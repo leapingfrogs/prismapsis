@@ -1,0 +1,40 @@
+[package]
+name = "prismapsis"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97.1"
+description = "A gravity-bouncing, colour-collecting shooter built with Bevy"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+bevy = "0.20.1"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+# Bevy systems take resources/queries by value and often have complex query types.
+needless_pass_by_value = "allow"
+type_complexity = "allow"
+too_many_arguments = "allow"
+module_name_repetitions = "allow"
+
+# Optimise dependencies even in dev builds; Bevy is unusably slow otherwise.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
