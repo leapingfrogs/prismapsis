@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
 
+pub mod beam;
 #[cfg(feature = "dev")]
 pub mod dev_tools;
 pub mod hero;
@@ -53,8 +54,11 @@ impl Plugin for SimulationPlugin {
             .register_type::<physics::BounceTuning>()
             .add_systems(Startup, (level::spawn_test_room, hero::spawn_hero))
             .add_systems(Update, hero::spin_input)
-            .add_systems(FixedUpdate, hero::move_hero)
-            .add_plugins(prism::PrismPlugin);
+            .add_systems(
+                FixedUpdate,
+                (hero::move_hero, hero::update_facing.after(hero::move_hero)),
+            )
+            .add_plugins((prism::PrismPlugin, beam::BeamPlugin));
     }
 }
 

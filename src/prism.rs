@@ -10,6 +10,11 @@ use bevy::prelude::*;
 
 use crate::hero::{Hero, Position, PreviousPosition, move_hero};
 
+/// Size of the prism, centre to tip (world units). Beams treat it as a
+/// circle of this radius, which is simpler and more forgiving to aim with
+/// than the exact triangle.
+pub const PRISM_RADIUS: f32 = 20.0;
+
 /// Tunable orbit parameters. Adjusted live from the dev tuning panel.
 #[derive(Resource, Debug, Clone, PartialEq, Reflect)]
 #[reflect(Resource)]
@@ -96,7 +101,7 @@ fn spawn_prism(mut commands: Commands, tuning: Res<PrismTuning>) {
     ));
 }
 
-/// Hold Space or Left Shift (gamepad South) to freeze the prism; while
+/// Hold Shift (gamepad left trigger) to freeze the prism; while
 /// frozen, Up/W (d-pad up) nudges it anticlockwise and Down/S (d-pad down)
 /// clockwise.
 fn prism_input(
@@ -106,8 +111,8 @@ fn prism_input(
     mut nudge: ResMut<PrismNudge>,
 ) {
     let pad_held = |button| gamepads.iter().any(|pad| pad.pressed(button));
-    let held =
-        keys.any_pressed([KeyCode::Space, KeyCode::ShiftLeft]) || pad_held(GamepadButton::South);
+    let held = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+        || pad_held(GamepadButton::LeftTrigger2);
     let up = keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) || pad_held(GamepadButton::DPadUp);
     let down =
         keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) || pad_held(GamepadButton::DPadDown);
@@ -124,7 +129,7 @@ fn prism_input(
 
 /// Advance the orbit and place the prism relative to the hero's new
 /// position. Runs after the hero moves so the two stay in step.
-fn orbit_prism(
+pub fn orbit_prism(
     time: Res<Time>,
     tuning: Res<PrismTuning>,
     frozen: Res<PrismFrozen>,
@@ -224,7 +229,7 @@ mod tests {
         }
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Space);
+            .press(KeyCode::ShiftLeft);
         app.update();
         let (_, _, before) = hero_and_prism(&mut app);
         for _ in 0..60 {
@@ -238,7 +243,7 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .release(KeyCode::Space);
+            .release(KeyCode::ShiftLeft);
         for _ in 0..10 {
             app.update();
         }
@@ -264,11 +269,11 @@ mod tests {
             }
         };
 
-        hold(&mut app, &[KeyCode::Space]);
+        hold(&mut app, &[KeyCode::ShiftLeft]);
         app.update();
         let (_, _, start) = hero_and_prism(&mut app);
 
-        hold(&mut app, &[KeyCode::Space, KeyCode::ArrowUp]);
+        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::ArrowUp]);
         for _ in 0..30 {
             app.update();
         }
@@ -278,7 +283,7 @@ mod tests {
             "up should turn anticlockwise"
         );
 
-        hold(&mut app, &[KeyCode::Space, KeyCode::KeyS]);
+        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::KeyS]);
         for _ in 0..30 {
             app.update();
         }

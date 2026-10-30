@@ -37,6 +37,26 @@ pub struct Velocity(pub Vec2);
 #[reflect(Component)]
 pub struct Spin(pub i8);
 
+/// Horizontal direction the hero last moved: 1 right, -1 left. Kept when
+/// the hero bounces in place, so it still has a direction to fire in.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+pub struct Facing(pub i8);
+
+impl Default for Facing {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+impl Facing {
+    /// Unit vector in the facing direction.
+    #[must_use]
+    pub fn direction(self) -> Vec2 {
+        Vec2::new(f32::from(self.0), 0.0)
+    }
+}
+
 pub fn spawn_hero(mut commands: Commands) {
     commands.spawn((
         Name::new("Hero"),
@@ -45,6 +65,7 @@ pub fn spawn_hero(mut commands: Commands) {
         PreviousPosition(HERO_SPAWN),
         Velocity::default(),
         Spin::default(),
+        Facing::default(),
     ));
 }
 
@@ -105,6 +126,23 @@ pub fn move_hero(
         physics::step(&mut body, &mut spin.0, &tuning, &solids, time.delta_secs());
         pos.0 = body.pos;
         vel.0 = body.vel;
+    }
+}
+
+/// Track the direction of horizontal travel; unchanged while not moving
+/// horizontally.
+pub fn update_facing(mut heroes: Query<(&Velocity, &mut Facing), With<Hero>>) {
+    for (vel, mut facing) in &mut heroes {
+        let moving = if vel.0.x > 0.0 {
+            1
+        } else if vel.0.x < 0.0 {
+            -1
+        } else {
+            continue;
+        };
+        if facing.0 != moving {
+            facing.0 = moving;
+        }
     }
 }
 

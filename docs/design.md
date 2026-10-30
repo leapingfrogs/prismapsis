@@ -35,7 +35,7 @@ starting points to be adjusted in play.
 - **Holding a button freezes it** in place on its orbit, e.g. to park it in
   front as a shield or to line it up with incoming light.
 - The prism **absorbs light** it sweeps through.
-- Controls: hold **Space / Left Shift** (gamepad **South**) to freeze. It
+- Controls: hold **Shift** (gamepad **left trigger**) to freeze. It
   brightens while frozen, and its tip always points away from the hero.
 - While frozen, **Up / W** (d-pad up) nudges it anticlockwise and
   **Down / S** (d-pad down) clockwise, slowly, for precise positioning in
@@ -47,8 +47,33 @@ starting points to be adjusted in play.
 
 ## Shooting
 
-- The hero **fires automatically in the direction of travel**.
-- Shots that pass through the prism are refracted into extra beams.
+- The player **controls when to fire**: holding **Space** (gamepad **South**
+  or **right trigger**) keeps a continuous laser beam on. Chosen over
+  automatic pulses so charging and firing become a strategic choice.
+- **Beam energy** limits firing (starting values, all tunable):
+  - 100 energy; firing drains 35/s, so a full bar lasts about 3 s.
+  - Recharges at 25/s after a 0.6 s pause once firing stops.
+  - Starting to fire needs at least 15 energy.
+  - Running dry cuts the beam; fire must be released and pressed again.
+  - An energy bar sits top-left and turns red when there isn't enough
+    energy to start firing.
+- It fires **horizontally in the direction of travel**: the way the hero is
+  moving, or the way it last moved when spin is 0.
+- The beam is a ray from the hero that **reaches the first wall**. Whatever
+  it touches takes damage ticks (10 per second).
+- A beam that crosses the prism **splits into red, green and blue beams**
+  that fan out from the prism, centred on the direction pointing away from
+  the hero. Moving the prism around its orbit aims the spread, which gives
+  freezing and nudging a combat role. Split beams also reach the first wall
+  and don't re-enter the prism.
+- Because shots are horizontal, the prism only sits in the line of fire
+  near the front or back of its orbit.
+- Beam colour is **cosmetic for now**: all beams deal the same damage. Colour
+  rules (e.g. the beam colour deciding which light an enemy drops) are
+  decided with light collection in iteration 5.
+- Power-ups map onto the beam: rear shot adds a backwards beam, spread
+  widens the split fan, rapid fire becomes faster recharge or lower drain,
+  and piercing lets beams pass through enemies.
 
 ## Light and the spectrum
 
@@ -89,6 +114,19 @@ starting points to be adjusted in play.
 Weapon power-ups are **separate pickups that stack**: rear shot, spread,
 rapid fire and piercing all apply together once collected.
 
+### Beam energy as a power-up lever
+
+Beam energy gives power-ups a cost dimension as well as a benefit:
+
+- **Capacity and recharge upgrades**, such as a larger energy bar for
+  longer shots, faster recharge, or a shorter recharge delay.
+- **Energy-hungry abilities**, where stronger weapons cost more to use.
+  For example, rear shot or piercing could raise the drain rate while
+  active, so collecting more power trades against how long you can fire.
+- To decide when iteration 4 designs the pickups: whether costly abilities
+  are always on once collected, or toggled so the player chooses when to
+  pay for them.
+
 ## Levels
 
 - **Wide horizontal levels, scrolling both ways.** Negative spin travels
@@ -127,7 +165,8 @@ rapid fire and piercing all apply together once collected.
 |---|------|-------|
 | 1 | Bounce feel | Test room with floor, walls and a low ceiling; fixed apex bounce; spin steps -5..+5; camera follow; debug overlay to tune apex, gravity and speed per step. |
 | 2 | Prism | Auto-orbit, hold to freeze, orbit radius and speed tuning. |
-| 3 | Shooting and enemies | Auto-fire in travel direction, refraction through the prism, simple enemies that release light. |
+| 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
+| 3b | Enemies | Simple enemies with movement patterns that take damage from beam pulses and release light. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, weapon upgrades, mirror face, light nova. |
 | 5 | Light and colour | Absorbing light, additive mixing, colour-gated platforms and doors. |
 | 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |
