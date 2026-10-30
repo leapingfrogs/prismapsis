@@ -21,7 +21,10 @@ starting points to be adjusted in play.
   (`speed = step × speed_per_step`). Horizontal speed is kept while airborne.
 - Spin is **not** changed by friction or by hitting things (for now). Spin
   decay or transfer may come later as an advanced mechanic.
-- **Walls** reverse horizontal movement.
+- **Walls** reverse horizontal movement **and flip the spin step** (e.g. +3
+  becomes -3), so the hero carries on bouncing away from the wall. Chosen
+  in playtesting over keeping the spin, which sent the hero straight back
+  into the wall on the next floor bounce.
 - **Ceilings** (e.g. a low platform overhead) cut the bounce short: the hero
   rebounds downward without losing energy, so the apex is capped by the
   ceiling.
@@ -87,6 +90,13 @@ rapid fire and piercing all apply together once collected.
 
 - **One hit loses a life** and returns the hero to the last checkpoint.
 
+## Resolution and art
+
+- The world is **1080 units tall** at any window size; width follows the
+  aspect ratio.
+- At 4K each world unit covers 2×2 pixels, so sprite art should be authored
+  at **2× its in-world size** to stay sharp at 4K.
+
 ## 3D
 
 - **Undecided.** Keep game logic independent of rendering so a 2.5D or 3D
@@ -94,8 +104,6 @@ rapid fire and piercing all apply together once collected.
 
 ## Open questions
 
-- When a wall reverses the hero, does the spin step flip too, or does the next
-  floor bounce send the hero back towards the wall?
 - Does stored light persist across lives, or reset at a checkpoint?
 - How are restored colours represented: per level, per world, or globally?
 - Can secondary colours (yellow, cyan, magenta) come from enemies directly, or
