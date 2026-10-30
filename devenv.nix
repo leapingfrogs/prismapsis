@@ -39,6 +39,7 @@ in
       cargo-outdated
       cargo-machete
       actionlint
+      committed
       just
     ]
     ++ runtimeLibs;

@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "fix(deps)"
+      prefix-development: "chore(deps)"
     groups:
       bevy:
         patterns: ["bevy*"]
@@ -11,6 +14,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message:
+      prefix: "ci"
     ignore:
       # Refs of this action select a Rust toolchain, not an action version.
       - dependency-name: dtolnay/rust-toolchain

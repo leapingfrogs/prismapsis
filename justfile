@@ -44,8 +44,12 @@ audit:
 outdated:
     cargo outdated --root-deps-only --exit-code 1
 
+# Check commit messages not yet on origin/main follow Conventional Commits
+lint-commits:
+    committed -vv --no-merge-commit origin/main..HEAD
+
 # Run every check CI runs (outdated is informational and excluded)
-ci: lint coverage audit
+ci: lint lint-commits coverage audit
 
 # Remove build artifacts
 clean:
