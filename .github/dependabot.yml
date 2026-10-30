@@ -11,3 +11,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Refs of this action select a Rust toolchain, not an action version.
+      - dependency-name: dtolnay/rust-toolchain
