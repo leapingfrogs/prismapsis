@@ -35,6 +35,15 @@ starting points to be adjusted in play.
 - **Holding a button freezes it** in place on its orbit, e.g. to park it in
   front as a shield or to line it up with incoming light.
 - The prism **absorbs light** it sweeps through.
+- Controls: hold **Space / Left Shift** (gamepad **South**) to freeze. It
+  brightens while frozen, and its tip always points away from the hero.
+- While frozen, **Up / W** (d-pad up) nudges it anticlockwise and
+  **Down / S** (d-pad down) clockwise, slowly, for precise positioning in
+  puzzles. The nudge keys do nothing while it orbits.
+- It currently **passes through solids**; whether walls should block it is
+  open until light and shooting are in.
+- Starting tuning: orbit radius 90, 0.6 revolutions per second
+  anticlockwise, nudge 0.25 revolutions per second.
 
 ## Shooting
 

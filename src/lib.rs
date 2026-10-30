@@ -13,6 +13,7 @@ pub mod dev_tools;
 pub mod hero;
 pub mod level;
 pub mod physics;
+pub mod prism;
 pub mod render;
 
 /// Title shown on the game window.
@@ -52,7 +53,8 @@ impl Plugin for SimulationPlugin {
             .register_type::<physics::BounceTuning>()
             .add_systems(Startup, (level::spawn_test_room, hero::spawn_hero))
             .add_systems(Update, hero::spin_input)
-            .add_systems(FixedUpdate, hero::move_hero);
+            .add_systems(FixedUpdate, hero::move_hero)
+            .add_plugins(prism::PrismPlugin);
     }
 }
 

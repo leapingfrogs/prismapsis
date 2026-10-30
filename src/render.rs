@@ -8,6 +8,8 @@ use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 use crate::hero::{HERO_RADIUS, Hero, Position, PreviousPosition, Spin};
 use crate::level::{RoomBounds, Solid};
 use crate::physics::BounceTuning;
+use crate::prism::{Prism, PrismFrozen};
+use std::f32::consts::FRAC_PI_2;
 
 /// Vertical extent of the view in world units, regardless of window size.
 pub const DESIGN_HEIGHT: f32 = 1080.0;
@@ -29,12 +31,93 @@ impl Plugin for PresentationPlugin {
             (
                 draw_solids,
                 draw_hero,
+                draw_prism,
                 toggle_fullscreen,
                 sync_positions,
                 spin_hero_visual,
                 follow_hero.after(sync_positions),
+                orient_prism.after(sync_positions),
+                tint_frozen_prism,
             ),
         );
+    }
+}
+
+/// Size of the prism triangle (centre to tip, world units).
+const PRISM_SIZE: f32 = 20.0;
+const PRISM_COLOUR: Color = Color::srgba(0.8, 0.92, 1.0, 0.7);
+const PRISM_FROZEN_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.95);
+
+/// Materials for the prism's normal and frozen states.
+#[derive(Resource, Debug)]
+struct PrismMaterials {
+    normal: Handle<ColorMaterial>,
+    frozen: Handle<ColorMaterial>,
+}
+
+fn draw_prism(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    prisms: Query<(Entity, &Position), Added<Prism>>,
+) {
+    for (entity, pos) in &prisms {
+        let prism_materials = PrismMaterials {
+            normal: materials.add(PRISM_COLOUR),
+            frozen: materials.add(PRISM_FROZEN_COLOUR),
+        };
+        // Equilateral triangle with its tip along +y; `orient_prism` turns
+        // the tip to face away from the hero.
+        let triangle = Triangle2d::new(
+            Vec2::new(0.0, PRISM_SIZE),
+            Vec2::from_angle(210f32.to_radians()) * PRISM_SIZE,
+            Vec2::from_angle(330f32.to_radians()) * PRISM_SIZE,
+        );
+        commands.entity(entity).insert((
+            Mesh2d(meshes.add(triangle)),
+            MeshMaterial2d(prism_materials.normal.clone()),
+            Transform::from_translation(pos.0.extend(2.0)),
+        ));
+        commands.insert_resource(prism_materials);
+    }
+}
+
+/// Point the prism's tip outward from the hero, using drawn (interpolated)
+/// positions so it turns smoothly.
+fn orient_prism(
+    heroes: Query<&Transform, (With<Hero>, Without<Prism>)>,
+    mut prisms: Query<&mut Transform, (With<Prism>, Without<Hero>)>,
+) {
+    let Ok(hero) = heroes.single() else {
+        return;
+    };
+    for mut transform in &mut prisms {
+        let outward = (transform.translation - hero.translation).truncate();
+        if outward != Vec2::ZERO {
+            transform.rotation = Quat::from_rotation_z(outward.to_angle() - FRAC_PI_2);
+        }
+    }
+}
+
+/// Brighten the prism while it is held in place.
+fn tint_frozen_prism(
+    frozen: Res<PrismFrozen>,
+    materials: Option<Res<PrismMaterials>>,
+    mut prisms: Query<&mut MeshMaterial2d<ColorMaterial>, With<Prism>>,
+) {
+    let Some(materials) = materials else {
+        return;
+    };
+    if !frozen.is_changed() && !materials.is_added() {
+        return;
+    }
+    let handle = if frozen.0 {
+        &materials.frozen
+    } else {
+        &materials.normal
+    };
+    for mut material in &mut prisms {
+        material.0 = handle.clone();
     }
 }
 
