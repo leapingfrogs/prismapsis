@@ -8,6 +8,7 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::physics::{BounceTuning, MAX_SPIN};
+use crate::prism::{PrismFrozen, PrismTuning};
 
 #[derive(Debug, Default)]
 pub struct DevToolsPlugin;
@@ -70,6 +71,8 @@ fn tuning_panel(
     mut contexts: EguiContexts,
     visible: Res<PanelVisible>,
     mut tuning: ResMut<BounceTuning>,
+    mut prism_tuning: ResMut<PrismTuning>,
+    prism_frozen: Res<PrismFrozen>,
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
     diagnostics: Res<DiagnosticsStore>,
     mut fixed_time: ResMut<Time<Fixed>>,
@@ -84,8 +87,27 @@ fn tuning_panel(
         ui.add(egui::Slider::new(&mut tuning.apex_height, 50.0..=900.0).text("apex height"));
         ui.add(egui::Slider::new(&mut tuning.speed_per_step, 10.0..=300.0).text("speed per step"));
         ui.checkbox(&mut tuning.wall_flips_spin, "walls flip spin");
+        ui.separator();
+        ui.add(
+            egui::Slider::new(&mut prism_tuning.orbit_radius, 40.0..=250.0)
+                .text("prism orbit radius"),
+        );
+        ui.add(
+            egui::Slider::new(&mut prism_tuning.orbit_speed, -2.0..=2.0)
+                .text("prism orbit (rev/s)"),
+        );
+        ui.add(
+            egui::Slider::new(&mut prism_tuning.nudge_speed, 0.05..=1.0)
+                .text("prism nudge (rev/s)"),
+        );
+        ui.label(if prism_frozen.0 {
+            "prism: frozen"
+        } else {
+            "prism: orbiting"
+        });
         if ui.button("Reset tuning").clicked() {
             *tuning = BounceTuning::default();
+            *prism_tuning = PrismTuning::default();
         }
         ui.separator();
         for (pos, vel, spin) in &heroes {
@@ -146,6 +168,7 @@ fn tuning_panel(
             fixed_time.set_timestep_hz(hz);
         }
         ui.label("←/→ or A/D: spin   R: reset hero");
+        ui.label("Space/Shift: freeze prism   ↑/↓ or W/S while frozen: nudge");
     });
     Ok(())
 }
