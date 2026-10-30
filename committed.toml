@@ -1,0 +1,12 @@
+# Commit message linting (https://github.com/crate-ci/committed).
+# Messages must be Conventional Commits so release-please can read them.
+style = "conventional"
+allowed_types = ["feat", "fix", "perf", "revert", "docs", "refactor", "test", "build", "ci", "chore", "style"]
+subject_length = 72
+line_length = 100
+subject_capitalized = false
+subject_not_punctuated = true
+imperative_subject = true
+no_fixup = true
+no_wip = true
+merge_commit = false
