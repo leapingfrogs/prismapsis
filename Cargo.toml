@@ -7,8 +7,13 @@ description = "A gravity-bouncing, colour-collecting shooter built with Bevy"
 license = "MIT OR Apache-2.0"
 publish = false
 
+[features]
+# Developer tools (live tuning panel). Off in release builds.
+dev = ["dep:bevy_egui"]
+
 [dependencies]
 bevy = "0.20.1"
+bevy_egui = { version = "0.43.1", optional = true }
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -27,6 +32,8 @@ needless_pass_by_value = "allow"
 type_complexity = "allow"
 too_many_arguments = "allow"
 module_name_repetitions = "allow"
+# mul_add obscures game maths and is not faster on every target.
+suboptimal_flops = "allow"
 
 # Optimise dependencies even in dev builds; Bevy is unusably slow otherwise.
 [profile.dev]
@@ -38,3 +45,5 @@ opt-level = 3
 [profile.release]
 lto = "thin"
 codegen-units = 1
+# Drop symbols and debug info from shipped binaries.
+strip = true

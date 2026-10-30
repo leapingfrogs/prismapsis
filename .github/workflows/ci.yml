@@ -59,17 +59,17 @@ jobs:
       - name: Run tests with coverage
         run: cargo llvm-cov --all-features --locked --no-report
       - name: Check threshold and write lcov
-        run: cargo llvm-cov report --ignore-filename-regex src/main.rs --fail-under-lines 80 --lcov --output-path lcov.info
+        run: cargo llvm-cov report --ignore-filename-regex 'src/(main|dev_tools)\.rs' --fail-under-lines 80 --lcov --output-path lcov.info
       - name: Write HTML report
         if: always()
-        run: cargo llvm-cov report --ignore-filename-regex src/main.rs --html
+        run: cargo llvm-cov report --ignore-filename-regex 'src/(main|dev_tools)\.rs' --html
       - name: Add summary to job summary
         if: always()
         run: |
           {
             echo '## Coverage'
             echo '```'
-            cargo llvm-cov report --ignore-filename-regex src/main.rs --summary-only | sed "s|$GITHUB_WORKSPACE/||"
+            cargo llvm-cov report --ignore-filename-regex 'src/(main|dev_tools)\.rs' --summary-only | sed "s|$GITHUB_WORKSPACE/||"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7

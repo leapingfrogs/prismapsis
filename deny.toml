@@ -28,6 +28,11 @@ allow = [
     "Unlicense",
 ]
 
+# egui (dev-only tuning panel) bundles open-licensed fonts.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
 [bans]
 # Bevy's tree has many unavoidable duplicate versions; surface them without failing.
 multiple-versions = "warn"
