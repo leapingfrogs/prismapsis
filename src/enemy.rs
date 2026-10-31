@@ -11,6 +11,7 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 
 use crate::beam::{BeamEnergy, damage_enemies};
+use crate::events::GameEvent;
 use crate::hero::{
     Facing, HERO_RADIUS, HERO_SPAWN, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
 };
@@ -389,6 +390,7 @@ fn move_motes(
 fn update_lenses(
     mut commands: Commands,
     time: Res<Time>,
+    mut events: MessageWriter<GameEvent>,
     tuning: Res<EnemyTuning>,
     solids: Query<&Solid>,
     heroes: Query<&Position, With<Hero>>,
@@ -418,6 +420,7 @@ fn update_lenses(
             Position(start),
             PreviousPosition(start),
         ));
+        events.write(GameEvent::OrbFired { at: start });
         lens.cooldown = tuning.lens_fire_interval;
     }
 }
@@ -426,6 +429,7 @@ fn update_lenses(
 fn move_orbs(
     mut commands: Commands,
     time: Res<Time>,
+    mut events: MessageWriter<GameEvent>,
     solids: Query<&Solid>,
     prisms: Query<&Position, (With<Prism>, Without<Orb>)>,
     mut orbs: Query<(Entity, &mut Orb, &mut Position, &mut PreviousPosition)>,
@@ -441,6 +445,9 @@ fn move_orbs(
         let hit_solid = solids
             .iter()
             .any(|s| circle_hits_solid(pos.0, ORB_RADIUS, &s.0));
+        if blocked_by_prism {
+            events.write(GameEvent::OrbBlocked { at: pos.0 });
+        }
         if blocked_by_prism || hit_solid || orb.age > ORB_MAX_AGE {
             commands.entity(entity).despawn();
         }
@@ -451,6 +458,7 @@ fn move_orbs(
 /// power-up.
 fn defeat_enemies(
     mut commands: Commands,
+    mut events: MessageWriter<GameEvent>,
     mut kills: ResMut<Kills>,
     mut rng: ResMut<DropRng>,
     abilities: Res<Abilities>,
@@ -462,8 +470,13 @@ fn defeat_enemies(
             continue;
         }
         commands.entity(entity).despawn();
+        events.write(GameEvent::EnemyDefeated {
+            kind: enemy.kind,
+            at: pos.0,
+        });
         if let Some(power) = roll_drop(&mut rng, *abilities, powerup_tuning.drop_chance) {
             commands.spawn(pickup_bundle(power, pos.0));
+            events.write(GameEvent::PickupDropped { power, at: pos.0 });
         }
         commands.spawn((
             Name::new("Burst"),
@@ -484,6 +497,7 @@ fn defeat_enemies(
 /// hero; with no lives left, the room resets.
 fn hero_hits(
     mut commands: Commands,
+    mut events: MessageWriter<GameEvent>,
     tuning: Res<EnemyTuning>,
     mut lives: ResMut<Lives>,
     mut abilities: ResMut<Abilities>,
@@ -523,6 +537,13 @@ fn hero_hits(
         commands.entity(orb).despawn();
     }
 
+    events.write(GameEvent::LifeLost {
+        at: pos.0,
+        respawn: HERO_SPAWN,
+    });
+    if *abilities != Abilities::default() {
+        events.write(GameEvent::AbilitiesLost);
+    }
     lives.0 = lives.0.saturating_sub(1);
     *abilities = Abilities::default();
     if lives.0 == 0 {
@@ -540,6 +561,7 @@ fn hero_hits(
 /// pickups and abilities.
 pub fn reset_room(
     mut commands: Commands,
+    mut events: MessageWriter<GameEvent>,
     tuning: Res<EnemyTuning>,
     mut reset: ResMut<ResetRoom>,
     mut lives: ResMut<Lives>,
@@ -553,6 +575,7 @@ pub fn reset_room(
         return;
     }
     reset.0 = false;
+    events.write(GameEvent::RoomReset);
     for entity in &clear {
         commands.entity(entity).despawn();
     }
@@ -583,10 +606,17 @@ fn fade_enemy_flash(time: Res<Time>, mut enemies: Query<&mut Enemy>) {
     }
 }
 
-fn tick_invulnerability(time: Res<Time>, mut heroes: Query<&mut Invulnerable>) {
-    for mut invulnerable in &mut heroes {
+fn tick_invulnerability(
+    time: Res<Time>,
+    mut events: MessageWriter<GameEvent>,
+    mut heroes: Query<(&Position, &mut Invulnerable)>,
+) {
+    for (pos, mut invulnerable) in &mut heroes {
         if invulnerable.0 > 0.0 {
             invulnerable.0 = (invulnerable.0 - time.delta_secs()).max(0.0);
+            if invulnerable.0 <= 0.0 {
+                events.write(GameEvent::InvulnerabilityEnded { at: pos.0 });
+            }
         }
     }
 }

@@ -33,40 +33,41 @@ pub struct PresentationPlugin;
 
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            (
-                spawn_camera,
-                spawn_beam_visuals,
-                spawn_energy_bar,
-                spawn_life_pips,
-                spawn_ability_pips,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                draw_solids,
-                draw_hero,
-                draw_prism,
-                toggle_fullscreen,
-                sync_positions,
-                spin_hero_visual,
-                follow_hero.after(sync_positions),
-                orient_prism.after(sync_positions),
-                tint_frozen_prism,
-                draw_beam.after(sync_positions),
-                update_energy_bar,
-                draw_enemies,
-                tint_enemies,
-                draw_orbs,
-                draw_bursts,
-                animate_bursts,
-                blink_hero,
-                update_life_pips,
-            ),
-        )
-        .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips));
+        app.init_resource::<BeamView>()
+            .add_systems(
+                Startup,
+                (
+                    spawn_camera,
+                    spawn_beam_visuals,
+                    spawn_energy_bar,
+                    spawn_life_pips,
+                    spawn_ability_pips,
+                ),
+            )
+            .add_systems(
+                Update,
+                (
+                    draw_solids,
+                    draw_hero,
+                    draw_prism,
+                    toggle_fullscreen,
+                    sync_positions,
+                    spin_hero_visual,
+                    follow_hero.after(sync_positions),
+                    orient_prism.after(sync_positions),
+                    tint_frozen_prism,
+                    draw_beam.after(sync_positions),
+                    update_energy_bar,
+                    draw_enemies,
+                    tint_enemies,
+                    draw_orbs,
+                    draw_bursts,
+                    animate_bursts,
+                    blink_hero,
+                    update_life_pips,
+                ),
+            )
+            .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips));
     }
 }
 
@@ -228,6 +229,14 @@ pub const fn beam_colour(colour: BeamColour) -> Color {
     }
 }
 
+/// What the drawn beam looks like this frame, for other presentation
+/// (such as sound) to follow.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BeamView {
+    /// Some beam crosses the prism and splits into colours.
+    pub split: bool,
+}
+
 /// One of the reusable beam pieces, by index into the current trace.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BeamVisual(pub usize);
@@ -293,6 +302,7 @@ fn draw_beam(
     abilities: Res<Abilities>,
     powerups: Res<PowerUpTuning>,
     beam_materials: Option<Res<BeamMaterials>>,
+    mut view: ResMut<BeamView>,
     heroes: Query<(&Transform, &Facing), (With<Hero>, Without<BeamVisual>)>,
     prisms: Query<&Transform, (With<Prism>, Without<Hero>, Without<BeamVisual>)>,
     solids: Query<&Solid>,
@@ -328,6 +338,10 @@ fn draw_beam(
         }
         _ => BeamTrace::default(),
     };
+    let split = trace.segments.iter().any(|s| s.2 != BeamColour::White);
+    if view.split != split {
+        view.split = split;
+    }
     for (visual, mut transform, mut visibility, mut material) in &mut visuals {
         let Some(&(start, end, colour)) = trace.segments.get(visual.0) else {
             visibility.set_if_neq(Visibility::Hidden);

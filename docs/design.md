@@ -177,6 +177,43 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 - At 4K each world unit covers 2×2 pixels, so sprite art should be authored
   at **2× its in-world size** to stay sharp at 4K.
 
+## Sound
+
+- **Style: mixed.** Retro synth (chip-style blips, zaps and sweeps) for
+  core effects; glassy, shimmering modern synth for light, prism and colour
+  moments.
+- **Source: generated files.** A small Rust tool (`tools/sfx`, run with
+  `just sfx`) synthesises every sound from parameters kept in code and
+  writes the `.wav` files, which are committed. All sounds are original.
+- **Playback** uses Bevy's built-in audio. The simulation emits game events
+  (hits, defeats, pickups, lives); the presentation side plays sounds for
+  them, so rules stay audio-free and testable.
+- **Gentle stereo panning** by horizontal position relative to the camera,
+  clamped so nothing plays hard left or right. Off-screen events are
+  quieter, so waves can be heard arriving from either side.
+- **Musical feedback in Lydian.** Pitched sounds come from one Lydian scale
+  so overlapping effects sound in key. Red, green and blue map to the root,
+  third and fifth (together a major triad, so white light is a consonant
+  chord). The raised 4th, Lydian's colour note, is kept for shimmer accents
+  such as pickups, so it never clashes.
+- **Beam: a looping hum** while firing, with a short attack and release.
+  Its pitch dips as energy runs low, as a warning before it cuts out.
+- **Bounces are very soft**: a quiet low thump pitched up with the spin
+  step, so speed is audible without becoming tiring.
+- **First-pass events:**
+  - Combat: beam start/stop, enemy hit, mote defeated, lens defeated, lens
+    fires an orb, prism blocks an orb.
+  - Hero: floor bounce, wall bump, life lost, respawn, invulnerability ends,
+    room reset.
+  - Power-ups: pickup appears, collected (rising chime, a distinct note per
+    power-up), about to expire, abilities lost.
+  - Prism/UI: freeze and unfreeze, energy empty, energy fully recharged.
+- **Controls:** master, effects and beam volume sliders in the dev panel,
+  with buttons to audition each sound. Player-facing settings come with the
+  game loop.
+- **Music: not yet.** It comes later and will share the Lydian key, so the
+  effects sit over it.
+
 ## 3D
 
 - **Undecided.** Keep game logic independent of rendering so a 2.5D or 3D
@@ -202,7 +239,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
 | 4b | More power-ups | Mirror face, light nova, beam energy upgrades. |
+| 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Absorbing light, additive mixing, colour-gated platforms and doors. |
 | 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |
-| 7 | Game loop | Menus, pause, game over, score, audio. |
+| 7 | Game loop | Menus, pause, game over, score, music, audio settings. |
 | 8+ | 3D | To be designed. |

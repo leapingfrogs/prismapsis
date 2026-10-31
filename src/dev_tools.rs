@@ -2,6 +2,7 @@
 //! for bounce parameters. Toggle with F1 or backtick; R resets the hero.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
@@ -12,6 +13,7 @@ use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
+use crate::sound::{Auditions, SoundId, SoundSettings};
 
 #[derive(Debug, Default)]
 pub struct DevToolsPlugin;
@@ -23,6 +25,7 @@ impl Plugin for DevToolsPlugin {
         }
         app.add_plugins(EguiPlugin::default())
             .insert_resource(PanelVisible(true))
+            .init_resource::<AuditionChoice>()
             .add_systems(Update, (toggle_panel, reset_hero))
             .add_systems(EguiPrimaryContextPass, tuning_panel);
     }
@@ -30,6 +33,24 @@ impl Plugin for DevToolsPlugin {
 
 #[derive(Resource, Debug)]
 struct PanelVisible(bool);
+
+/// The sound picked for auditioning in the panel.
+#[derive(Resource, Debug)]
+struct AuditionChoice(SoundId);
+
+impl Default for AuditionChoice {
+    fn default() -> Self {
+        Self(SoundId::MoteDefeat)
+    }
+}
+
+/// The resources the sound section of the panel edits.
+#[derive(SystemParam)]
+struct SoundPanel<'w> {
+    settings: ResMut<'w, SoundSettings>,
+    auditions: ResMut<'w, Auditions>,
+    choice: ResMut<'w, AuditionChoice>,
+}
 
 const PRESENT_MODES: [PresentMode; 6] = [
     PresentMode::AutoVsync,
@@ -80,8 +101,8 @@ fn tuning_panel(
     mut enemy_tuning: ResMut<EnemyTuning>,
     mut powerup_tuning: ResMut<PowerUpTuning>,
     mut abilities: ResMut<Abilities>,
-    kills: Res<Kills>,
-    lives: Res<Lives>,
+    mut sound: SoundPanel,
+    (kills, lives): (Res<Kills>, Res<Lives>),
     mut reset_room: ResMut<ResetRoom>,
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
     diagnostics: Res<DiagnosticsStore>,
@@ -104,6 +125,8 @@ fn tuning_panel(
             enemy_section(ui, &mut enemy_tuning, *kills, *lives);
             ui.separator();
             powerup_section(ui, &mut powerup_tuning, &mut abilities);
+            ui.separator();
+            sound_section(ui, &mut sound);
             ui.horizontal(|ui| {
                 if ui.button("Reset tuning").clicked() {
                     *tuning = BounceTuning::default();
@@ -111,6 +134,7 @@ fn tuning_panel(
                     *beam_tuning = BeamTuning::default();
                     *enemy_tuning = EnemyTuning::default();
                     *powerup_tuning = PowerUpTuning::default();
+                    *sound.settings = SoundSettings::default();
                 }
                 if ui.button("Reset room").clicked() {
                     reset_room.0 = true;
@@ -252,6 +276,29 @@ fn powerup_section(ui: &mut egui::Ui, tuning: &mut PowerUpTuning, abilities: &mu
                     abilities.revoke(power);
                 }
             }
+        }
+    });
+}
+
+fn sound_section(ui: &mut egui::Ui, panel: &mut SoundPanel) {
+    let SoundPanel {
+        settings,
+        auditions,
+        choice,
+    } = panel;
+    ui.add(egui::Slider::new(&mut settings.master, 0.0..=1.0).text("master volume"));
+    ui.add(egui::Slider::new(&mut settings.effects, 0.0..=1.0).text("effects volume"));
+    ui.add(egui::Slider::new(&mut settings.beam, 0.0..=1.0).text("beam volume"));
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt("audition")
+            .selected_text(choice.0.name())
+            .show_ui(ui, |ui| {
+                for &id in SoundId::ALL {
+                    ui.selectable_value(&mut choice.0, id, id.name());
+                }
+            });
+        if ui.button("Play").clicked() {
+            auditions.0.push(choice.0);
         }
     });
 }

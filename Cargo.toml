@@ -12,15 +12,22 @@ publish = false
 dev = ["dep:bevy_egui"]
 
 [dependencies]
-bevy = "0.20.1"
+# `wav` decodes the generated sound effects.
+bevy = { version = "0.20.1", features = ["wav"] }
 bevy_egui = { version = "0.43.1", optional = true }
 
-[lints.rust]
+[workspace]
+members = ["tools/sfx"]
+
+[lints]
+workspace = true
+
+[workspace.lints.rust]
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 unused_qualifications = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 unwrap_used = "warn"
