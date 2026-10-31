@@ -6,8 +6,10 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::beam::{BeamColour, BeamEnergy, BeamTrace, BeamTuning, RayScene, trace_from_hero};
-use crate::hero::{Facing, HERO_RADIUS, Hero, Position, PreviousPosition, Spin};
-use crate::level::Target;
+use crate::enemy::{
+    BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, ORB_RADIUS, Orb, STARTING_LIVES,
+};
+use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{RoomBounds, Solid};
 use crate::physics::BounceTuning;
 use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
@@ -30,7 +32,12 @@ impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (spawn_camera, spawn_beam_visuals, spawn_energy_bar),
+            (
+                spawn_camera,
+                spawn_beam_visuals,
+                spawn_energy_bar,
+                spawn_life_pips,
+            ),
         )
         .add_systems(
             Update,
@@ -46,8 +53,13 @@ impl Plugin for PresentationPlugin {
                 tint_frozen_prism,
                 draw_beam.after(sync_positions),
                 update_energy_bar,
-                draw_targets,
-                tint_targets,
+                draw_enemies,
+                tint_enemies,
+                draw_orbs,
+                draw_bursts,
+                animate_bursts,
+                blink_hero,
+                update_life_pips,
             ),
         );
     }
@@ -188,6 +200,8 @@ fn draw_hero(
                 Mesh2d(meshes.add(circle_mesh(HERO_RADIUS))),
                 MeshMaterial2d(materials.add(HERO_COLOUR)),
                 Transform::from_translation(pos.0.extend(1.0)),
+                // Explicit so `blink_hero` always has it to toggle.
+                Visibility::default(),
             ))
             .add_child(mark);
     }
@@ -250,7 +264,7 @@ fn draw_beam(
     heroes: Query<(&Transform, &Facing), (With<Hero>, Without<BeamVisual>)>,
     prisms: Query<&Transform, (With<Prism>, Without<Hero>, Without<BeamVisual>)>,
     solids: Query<&Solid>,
-    targets: Query<(&Position, &Target)>,
+    enemies: Query<(&Position, &Enemy)>,
     mut visuals: Query<
         (&BeamVisual, &mut Transform, &mut Visibility),
         (Without<Hero>, Without<Prism>),
@@ -260,7 +274,7 @@ fn draw_beam(
         Ok((hero, facing)) if energy.firing => {
             let scene = RayScene {
                 solids: solids.iter().map(|s| s.0).collect(),
-                targets: targets.iter().map(|(p, t)| (p.0, t.radius)).collect(),
+                targets: enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
             };
             let prism = prisms.single().ok().map(|p| p.translation.truncate());
             trace_from_hero(
@@ -355,34 +369,167 @@ fn update_energy_bar(
     }
 }
 
-const TARGET_COLOUR: Color = Color::srgb(0.85, 0.55, 0.2);
-const TARGET_HIT_COLOUR: Color = Color::srgb(1.0, 1.0, 0.9);
+const MOTE_COLOUR: Color = Color::srgb(1.0, 0.88, 0.55);
+const LENS_COLOUR: Color = Color::srgb(0.45, 0.85, 0.95);
+const ENEMY_HIT_COLOUR: Color = Color::srgb(1.0, 1.0, 1.0);
+const ORB_COLOUR: Color = Color::srgb(0.8, 0.5, 1.0);
+const BURST_COLOUR: Color = Color::srgb(1.0, 0.95, 0.8);
 
-fn draw_targets(
+/// Base colour of an enemy type, before any hit flash.
+#[must_use]
+pub const fn enemy_colour(kind: EnemyKind) -> Color {
+    match kind {
+        EnemyKind::Mote => MOTE_COLOUR,
+        EnemyKind::Lens => LENS_COLOUR,
+    }
+}
+
+/// Motes are small round sparks; lenses are hexagonal crystals. Each gets
+/// its own material so it can flash independently.
+fn draw_enemies(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    targets: Query<(Entity, &Position, &Target), Added<Target>>,
+    enemies: Query<(Entity, &Position, &Enemy), Added<Enemy>>,
 ) {
-    for (entity, pos, target) in &targets {
+    for (entity, pos, enemy) in &enemies {
+        let mesh = match enemy.kind {
+            EnemyKind::Mote => meshes.add(circle_mesh(enemy.radius())),
+            EnemyKind::Lens => meshes.add(RegularPolygon::new(enemy.radius(), 6)),
+        };
         commands.entity(entity).insert((
-            Mesh2d(meshes.add(circle_mesh(target.radius))),
-            MeshMaterial2d(materials.add(TARGET_COLOUR)),
+            Mesh2d(mesh),
+            MeshMaterial2d(materials.add(enemy_colour(enemy.kind))),
             Transform::from_translation(pos.0.extend(0.5)),
         ));
     }
 }
 
-/// Flash targets towards white while their hit flash lasts.
-fn tint_targets(
+/// Flash enemies towards white while their hit flash lasts.
+fn tint_enemies(
     mut materials: ResMut<Assets<ColorMaterial>>,
-    targets: Query<(&Target, &MeshMaterial2d<ColorMaterial>), Changed<Target>>,
+    enemies: Query<(&Enemy, &MeshMaterial2d<ColorMaterial>), Changed<Enemy>>,
 ) {
-    for (target, material) in &targets {
+    for (enemy, material) in &enemies {
         if let Some(mut material) = materials.get_mut(&material.0) {
-            let flash = (target.flash / 0.15).clamp(0.0, 1.0);
-            material.color = TARGET_COLOUR.mix(&TARGET_HIT_COLOUR, flash);
+            let flash = (enemy.flash / HIT_FLASH).clamp(0.0, 1.0);
+            material.color = enemy_colour(enemy.kind).mix(&ENEMY_HIT_COLOUR, flash);
         }
+    }
+}
+
+fn draw_orbs(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    orbs: Query<(Entity, &Position), Added<Orb>>,
+) {
+    for (entity, pos) in &orbs {
+        commands.entity(entity).insert((
+            Mesh2d(meshes.add(circle_mesh(ORB_RADIUS))),
+            MeshMaterial2d(materials.add(ORB_COLOUR)),
+            Transform::from_translation(pos.0.extend(2.5)),
+        ));
+    }
+}
+
+/// Bursts are rings drawn at unit size and scaled up as they age.
+fn draw_bursts(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    bursts: Query<(Entity, &Position), Added<Burst>>,
+) {
+    for (entity, pos) in &bursts {
+        commands.entity(entity).insert((
+            Mesh2d(meshes.add(Annulus::new(0.8, 1.0))),
+            MeshMaterial2d(materials.add(BURST_COLOUR)),
+            Transform::from_translation(pos.0.extend(4.0)).with_scale(Vec3::ZERO),
+        ));
+    }
+}
+
+/// Grow each burst ring outward while fading it.
+fn animate_bursts(
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut bursts: Query<(&Burst, &mut Transform, &MeshMaterial2d<ColorMaterial>)>,
+) {
+    for (burst, mut transform, material) in &mut bursts {
+        let progress = (burst.age / BURST_LIFETIME).clamp(0.0, 1.0);
+        transform.scale = Vec3::new(burst.radius, burst.radius, 1.0) * progress.max(0.05);
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.color = BURST_COLOUR.with_alpha(1.0 - progress);
+        }
+    }
+}
+
+/// Blink rate of the hero while invulnerable (blinks per second).
+const BLINK_RATE: f32 = 10.0;
+
+/// Whether the hero is drawn this frame: blinking while invulnerable.
+#[must_use]
+pub fn hero_shown(invulnerable: f32) -> bool {
+    // Truncation is the point: alternate whole blink intervals.
+    #[allow(clippy::cast_possible_truncation)]
+    let interval = (invulnerable * BLINK_RATE) as i64;
+    invulnerable <= 0.0 || interval % 2 == 0
+}
+
+fn blink_hero(mut heroes: Query<(&Invulnerable, &mut Visibility), With<Hero>>) {
+    for (invulnerable, mut visibility) in &mut heroes {
+        let wanted = if hero_shown(invulnerable.0) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        visibility.set_if_neq(wanted);
+    }
+}
+
+const LIFE_COLOUR: Color = Color::srgb(0.92, 0.92, 0.96);
+
+/// One life indicator under the energy bar; index 0 is the leftmost.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LifePip(pub u8);
+
+fn spawn_life_pips(mut commands: Commands) {
+    commands
+        .spawn((
+            Name::new("Lives"),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Vw(1.5),
+                top: Val::Vh(5.0),
+                column_gap: Val::Vh(0.8),
+                ..default()
+            },
+        ))
+        .with_children(|row| {
+            for index in 0..STARTING_LIVES {
+                row.spawn((
+                    LifePip(index),
+                    Node {
+                        width: Val::Vh(1.6),
+                        height: Val::Vh(1.6),
+                        ..default()
+                    },
+                    BackgroundColor(LIFE_COLOUR),
+                ));
+            }
+        });
+}
+
+/// Show one pip per remaining life.
+fn update_life_pips(lives: Res<Lives>, mut pips: Query<(&LifePip, &mut Node)>) {
+    if !lives.is_changed() {
+        return;
+    }
+    for (pip, mut node) in &mut pips {
+        node.display = if pip.0 < lives.0 {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
@@ -630,6 +777,97 @@ mod tests {
         app.update();
         app.update();
         assert_eq!(visible_beams(&mut app), 0);
+    }
+
+    #[test]
+    fn hero_blinks_only_while_invulnerable() {
+        assert!(hero_shown(0.0));
+        assert!(hero_shown(0.05));
+        assert!(!hero_shown(0.15));
+        assert!(hero_shown(0.25));
+    }
+
+    #[test]
+    fn enemies_orbs_and_bursts_are_drawn() {
+        let mut app = presentation_app();
+        app.update();
+        app.world_mut().spawn((
+            Enemy {
+                kind: EnemyKind::Mote,
+                health: 0,
+                flash: HIT_FLASH,
+            },
+            Position(Vec2::new(1500.0, 600.0)),
+        ));
+        app.world_mut().spawn((
+            Orb {
+                vel: Vec2::ZERO,
+                age: 0.0,
+            },
+            Position(Vec2::new(1500.0, 700.0)),
+            PreviousPosition(Vec2::new(1500.0, 700.0)),
+        ));
+        app.update();
+        app.update();
+        let world = app.world_mut();
+        let undrawn_enemies = world
+            .query_filtered::<(), (With<Enemy>, Without<Mesh2d>)>()
+            .iter(world)
+            .count();
+        assert_eq!(undrawn_enemies, 0);
+        let drawn_orbs = world
+            .query_filtered::<(), (With<Orb>, With<Mesh2d>)>()
+            .iter(world)
+            .count();
+        assert_eq!(drawn_orbs, 1);
+        // The zero-health mote was defeated, leaving a growing burst.
+        let burst_scale = world
+            .query_filtered::<&Transform, (With<Burst>, With<Mesh2d>)>()
+            .single(world)
+            .unwrap()
+            .scale;
+        assert!(burst_scale.x > 0.0);
+    }
+
+    #[test]
+    fn losing_a_life_hides_a_pip_and_blinks_the_hero() {
+        let mut app = presentation_app();
+        app.update();
+        let hero = {
+            let world = app.world_mut();
+            world
+                .query_filtered::<&Position, With<Hero>>()
+                .single(world)
+                .unwrap()
+                .0
+        };
+        app.world_mut().spawn((
+            Enemy {
+                kind: EnemyKind::Mote,
+                health: 3,
+                flash: 0.0,
+            },
+            Position(hero),
+        ));
+        let mut hidden_frames = 0;
+        for _ in 0..20 {
+            app.update();
+            let world = app.world_mut();
+            let visibility = *world
+                .query_filtered::<&Visibility, With<Hero>>()
+                .single(world)
+                .unwrap();
+            hidden_frames += usize::from(visibility == Visibility::Hidden);
+        }
+        assert!(hidden_frames > 0, "hero should blink while invulnerable");
+
+        let world = app.world_mut();
+        let shown = world
+            .query::<(&LifePip, &Node)>()
+            .iter(world)
+            .filter(|(_, node)| node.display != Display::None)
+            .count();
+        assert_eq!(shown, usize::from(STARTING_LIVES - 1));
     }
 
     #[test]

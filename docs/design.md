@@ -85,6 +85,31 @@ starting points to be adjusted in play.
   platforms, doors and routes. Levels therefore gate progress by colour, and
   areas are revisited once new colours are restored.
 
+## Enemies
+
+- Enemies come in **distinct types**, each with a readable pattern;
+  learning them is part of mastery.
+- **Toughness varies by type**: weak enemies pop with a quick flick of the
+  beam, tough ones need a sustained burst, so energy management matters.
+- **Appearance:** some enemies are **placed in the level**; others arrive
+  in **waves from the screen edges on a timer** while the hero is in a
+  level section.
+- **Threat:** touching any enemy costs a life. **Some types shoot** slow
+  projectiles at the hero.
+- **The prism always blocks enemy shots**, so its orbit works as a rotating
+  shield and freezing it in place covers one side. (The mirror-face
+  power-up upgrades this from blocking to reflecting.)
+- Enemy shots are stopped by solids.
+- **On defeat**, enemies burst and leave nothing for now. Power-up drops
+  arrive in iteration 4 and light in iteration 5.
+
+### First enemy types
+
+| Type | Appears | Behaviour | Toughness |
+|------|---------|-----------|-----------|
+| **Mote** | Waves from the edges | Small sparks drifting across in sine-wave formations; dangerous in numbers. | Weak: a few beam ticks. |
+| **Lens** | Placed in the level | Fixed crystal turret that fires slow orbs of light at the hero. | Tough: needs a sustained burst. |
+
 ## Power-ups
 
 - Shooting an enemy has a **chance to drop a power-up**.
@@ -108,7 +133,7 @@ starting points to be adjusted in play.
 | Spread fire | Each shot fans out into several. |
 | Rapid fire | Higher fire rate. |
 | Piercing shots | Shots pass through enemies. |
-| Mirror face | The prism reflects enemy shots back at them, so freezing it in place makes a shield. |
+| Mirror face | Upgrades the prism from blocking enemy shots to **reflecting** them back at enemies. |
 | Light nova | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). |
 
 Weapon power-ups are **separate pickups that stack**: rear shot, spread,
@@ -166,7 +191,7 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 | 1 | Bounce feel | Test room with floor, walls and a low ceiling; fixed apex bounce; spin steps -5..+5; camera follow; debug overlay to tune apex, gravity and speed per step. |
 | 2 | Prism | Auto-orbit, hold to freeze, orbit radius and speed tuning. |
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
-| 3b | Enemies | Simple enemies with movement patterns that take damage from beam pulses and release light. |
+| 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, weapon upgrades, mirror face, light nova. |
 | 5 | Light and colour | Absorbing light, additive mixing, colour-gated platforms and doors. |
 | 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |

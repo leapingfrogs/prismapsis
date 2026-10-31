@@ -11,6 +11,7 @@ use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
 pub mod beam;
 #[cfg(feature = "dev")]
 pub mod dev_tools;
+pub mod enemy;
 pub mod hero;
 pub mod level;
 pub mod physics;
@@ -58,7 +59,7 @@ impl Plugin for SimulationPlugin {
                 FixedUpdate,
                 (hero::move_hero, hero::update_facing.after(hero::move_hero)),
             )
-            .add_plugins((prism::PrismPlugin, beam::BeamPlugin));
+            .add_plugins((prism::PrismPlugin, beam::BeamPlugin, enemy::EnemyPlugin));
     }
 }
 

@@ -57,6 +57,11 @@ impl Facing {
     }
 }
 
+/// Seconds of invulnerability remaining after losing a life.
+#[derive(Component, Debug, Default, Clone, Copy, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct Invulnerable(pub f32);
+
 pub fn spawn_hero(mut commands: Commands) {
     commands.spawn((
         Name::new("Hero"),
@@ -66,6 +71,7 @@ pub fn spawn_hero(mut commands: Commands) {
         Velocity::default(),
         Spin::default(),
         Facing::default(),
+        Invulnerable::default(),
     ));
 }
 

@@ -2,7 +2,6 @@
 
 use bevy::prelude::*;
 
-use crate::hero::Position;
 use crate::physics::Aabb;
 
 /// Static geometry the hero bounces off.
@@ -42,48 +41,17 @@ pub fn test_room() -> Vec<(&'static str, Aabb)> {
     ]
 }
 
-/// A dummy that beams can hit, for testing shooting. Counts hits and flashes
-/// briefly when struck. Doesn't block the hero.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Reflect)]
-#[reflect(Component)]
-pub struct Target {
-    pub radius: f32,
-    pub hits: u32,
-    /// Seconds of hit flash remaining.
-    pub flash: f32,
-}
-
-/// Radius of the test room's target dummies.
-pub const TARGET_RADIUS: f32 = 28.0;
-
-/// Target dummies placed within the hero's beam heights, plus one high up
-/// that only split beams from the prism can reach.
+/// Centres of the lens turrets placed in the test room: one at the far end
+/// of the step, one at the far end of the shelf, leaving room to land.
 #[must_use]
-pub fn test_targets() -> Vec<(&'static str, Vec2)> {
-    vec![
-        ("Target A", Vec2::new(1100.0, 200.0)),
-        ("Target B", Vec2::new(2150.0, 360.0)),
-        ("Target C", Vec2::new(3100.0, 150.0)),
-        ("Target D", Vec2::new(4300.0, 300.0)),
-        ("High target", Vec2::new(2600.0, 760.0)),
-    ]
+pub fn test_lenses() -> Vec<Vec2> {
+    vec![Vec2::new(2740.0, 270.0), Vec2::new(3850.0, 410.0)]
 }
 
 pub fn spawn_test_room(mut commands: Commands) {
     commands.insert_resource(RoomBounds(Aabb::new(Vec2::ZERO, TEST_ROOM_SIZE)));
     for (name, aabb) in test_room() {
         commands.spawn((Name::new(name), Solid(aabb)));
-    }
-    for (name, center) in test_targets() {
-        commands.spawn((
-            Name::new(name),
-            Position(center),
-            Target {
-                radius: TARGET_RADIUS,
-                hits: 0,
-                flash: 0.0,
-            },
-        ));
     }
 }
 
@@ -108,20 +76,22 @@ mod tests {
     }
 
     #[test]
-    fn test_targets_are_in_open_space() {
+    fn test_lenses_sit_in_open_space_inside_the_room() {
+        // Lens radius, kept local so the level doesn't depend on enemies.
+        let radius = 30.0;
         let bounds = Aabb::new(Vec2::ZERO, TEST_ROOM_SIZE);
-        for (name, center) in test_targets() {
-            let target = Aabb::from_center(center, Vec2::splat(TARGET_RADIUS));
+        for center in test_lenses() {
+            let lens = Aabb::from_center(center, Vec2::splat(radius));
             assert!(
-                target.min.cmpge(bounds.min).all() && target.max.cmple(bounds.max).all(),
-                "{name} outside room"
+                lens.min.cmpge(bounds.min).all() && lens.max.cmple(bounds.max).all(),
+                "lens at {center} outside room"
             );
             for (solid_name, solid) in test_room() {
-                let apart = target.max.x <= solid.min.x
-                    || solid.max.x <= target.min.x
-                    || target.max.y <= solid.min.y
-                    || solid.max.y <= target.min.y;
-                assert!(apart, "{name} overlaps {solid_name}");
+                let apart = lens.max.x <= solid.min.x
+                    || solid.max.x <= lens.min.x
+                    || lens.max.y <= solid.min.y
+                    || solid.max.y <= lens.min.y;
+                assert!(apart, "lens at {center} overlaps {solid_name}");
             }
         }
     }
@@ -135,8 +105,6 @@ mod tests {
         let world = app.world_mut();
         let solids = world.query::<&Solid>().iter(world).count();
         assert_eq!(solids, test_room().len());
-        let targets = world.query::<&Target>().iter(world).count();
-        assert_eq!(targets, test_targets().len());
         assert_eq!(world.resource::<RoomBounds>().0.size(), TEST_ROOM_SIZE);
     }
 }

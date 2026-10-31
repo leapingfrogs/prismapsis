@@ -7,16 +7,14 @@
 
 use bevy::prelude::*;
 
+use crate::enemy::{Enemy, HIT_FLASH};
 use crate::hero::{Facing, HERO_RADIUS, Hero, Position, update_facing};
-use crate::level::{Solid, Target};
+use crate::level::Solid;
 use crate::physics::{Aabb, ray_aabb, ray_circle};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
 /// Longest a beam can be if it hits nothing (world units).
 pub const MAX_BEAM_LENGTH: f32 = 6000.0;
-
-/// How long a target flashes after a hit (seconds).
-pub const TARGET_FLASH: f32 = 0.15;
 
 /// Tunable beam parameters. Adjusted live from the dev tuning panel.
 #[derive(Resource, Debug, Clone, PartialEq, Reflect)]
@@ -261,13 +259,10 @@ impl Plugin for BeamPlugin {
             .add_systems(Update, fire_input)
             .add_systems(
                 FixedUpdate,
-                (
-                    fade_target_flash,
-                    (update_energy, damage_targets)
-                        .chain()
-                        .after(orbit_prism)
-                        .after(update_facing),
-                ),
+                (update_energy, damage_enemies)
+                    .chain()
+                    .after(orbit_prism)
+                    .after(update_facing),
             );
     }
 }
@@ -299,8 +294,9 @@ fn update_energy(
     }
 }
 
-/// While firing, apply damage ticks to every target the beam touches.
-fn damage_targets(
+/// While firing, apply damage ticks to every enemy the beam touches.
+/// Defeating them (at zero health) is handled in `enemy`.
+pub fn damage_enemies(
     time: Res<Time>,
     tuning: Res<BeamTuning>,
     energy: Res<BeamEnergy>,
@@ -308,7 +304,7 @@ fn damage_targets(
     heroes: Query<(&Position, &Facing), With<Hero>>,
     prisms: Query<&Position, With<Prism>>,
     solids: Query<&Solid>,
-    mut targets: Query<(&Position, &mut Target)>,
+    mut enemies: Query<(&Position, &mut Enemy)>,
 ) {
     if !energy.firing {
         timer.0.reset();
@@ -328,24 +324,17 @@ fn damage_targets(
     }
     let scene = RayScene {
         solids: solids.iter().map(|s| s.0).collect(),
-        targets: targets.iter().map(|(p, t)| (p.0, t.radius)).collect(),
+        targets: enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
     };
     let prism = prisms.single().ok().map(|p| p.0);
     let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle);
 
-    let mut targets: Vec<_> = targets.iter_mut().map(|(_, t)| t).collect();
+    // Same query, same order as the scene built above.
+    let mut enemies: Vec<_> = enemies.iter_mut().map(|(_, e)| e).collect();
     for i in trace.hit_targets {
-        if let Some(target) = targets.get_mut(i) {
-            target.hits += ticks;
-            target.flash = TARGET_FLASH;
-        }
-    }
-}
-
-fn fade_target_flash(time: Res<Time>, mut targets: Query<&mut Target>) {
-    for mut target in &mut targets {
-        if target.flash > 0.0 {
-            target.flash = (target.flash - time.delta_secs()).max(0.0);
+        if let Some(enemy) = enemies.get_mut(i) {
+            enemy.health = enemy.health.saturating_sub(ticks);
+            enemy.flash = HIT_FLASH;
         }
     }
 }
@@ -354,6 +343,7 @@ fn fade_target_flash(time: Res<Time>, mut targets: Query<&mut Target>) {
 mod tests {
     use super::*;
     use crate::SimulationPlugin;
+    use crate::enemy::EnemyKind;
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
 
@@ -575,45 +565,59 @@ mod tests {
         app
     }
 
-    fn spawn_big_target(app: &mut App) -> Entity {
-        // Straddles every height the hero bounces through.
-        app.world_mut()
-            .spawn((
-                Position(Vec2::new(900.0, 260.0)),
-                Target {
-                    radius: 200.0,
-                    hits: 0,
+    const COLUMN_HEALTH: u32 = 1000;
+
+    /// A column of very tough enemies ahead of the hero, covering every height
+    /// it bounces through, so the beam always has something to hit.
+    fn spawn_enemy_column(app: &mut App) {
+        for i in 0..7u8 {
+            app.world_mut().spawn((
+                Position(Vec2::new(900.0, 110.0 + f32::from(i) * 55.0)),
+                Enemy {
+                    kind: EnemyKind::Lens,
+                    health: COLUMN_HEALTH,
                     flash: 0.0,
                 },
-            ))
-            .id()
+            ));
+        }
+    }
+
+    /// Total beam damage taken by the column so far.
+    fn column_damage(app: &mut App) -> u32 {
+        let world = app.world_mut();
+        world
+            .query::<&Enemy>()
+            .iter(world)
+            .filter(|e| e.health > COLUMN_HEALTH / 2)
+            .map(|e| COLUMN_HEALTH - e.health)
+            .sum()
     }
 
     #[test]
     fn nothing_is_hit_without_firing() {
         let mut app = sim_app();
         app.update();
-        let target = spawn_big_target(&mut app);
+        spawn_enemy_column(&mut app);
         for _ in 0..60 {
             app.update();
         }
-        assert_eq!(app.world().get::<Target>(target).unwrap().hits, 0);
+        assert_eq!(column_damage(&mut app), 0);
         assert!(!app.world().resource::<BeamEnergy>().firing);
     }
 
     #[test]
-    fn holding_space_damages_targets_and_uses_energy() {
+    fn holding_space_damages_enemies_and_uses_energy() {
         let mut app = sim_app();
         app.update();
-        let target = spawn_big_target(&mut app);
+        spawn_enemy_column(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
         for _ in 0..60 {
             app.update();
         }
-        let hits = app.world().get::<Target>(target).unwrap().hits;
-        assert!(hits >= 5, "expected several hits, got {hits}");
+        let damage = column_damage(&mut app);
+        assert!(damage >= 5, "expected several damage ticks, got {damage}");
         let energy = *app.world().resource::<BeamEnergy>();
         assert!(energy.current < BeamTuning::default().max_energy);
     }
