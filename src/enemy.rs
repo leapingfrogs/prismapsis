@@ -16,6 +16,7 @@ use crate::hero::{
 };
 use crate::level::{RoomBounds, Solid, test_lenses};
 use crate::physics::{Aabb, ray_aabb};
+use crate::powerup::{Abilities, DropRng, Pickup, PowerUpTuning, pickup_bundle, roll_drop};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
 /// Distance from the hero at which waves appear: just beyond the edge of a
@@ -446,10 +447,14 @@ fn move_orbs(
     }
 }
 
-/// Remove enemies with no health left, leaving a burst.
+/// Remove enemies with no health left, leaving a burst and sometimes a
+/// power-up.
 fn defeat_enemies(
     mut commands: Commands,
     mut kills: ResMut<Kills>,
+    mut rng: ResMut<DropRng>,
+    abilities: Res<Abilities>,
+    powerup_tuning: Res<PowerUpTuning>,
     enemies: Query<(Entity, &Enemy, &Position)>,
 ) {
     for (entity, enemy, pos) in &enemies {
@@ -457,6 +462,9 @@ fn defeat_enemies(
             continue;
         }
         commands.entity(entity).despawn();
+        if let Some(power) = roll_drop(&mut rng, *abilities, powerup_tuning.drop_chance) {
+            commands.spawn(pickup_bundle(power, pos.0));
+        }
         commands.spawn((
             Name::new("Burst"),
             Burst {
@@ -472,12 +480,13 @@ fn defeat_enemies(
     }
 }
 
-/// Touching an enemy or orb costs a life and respawns the hero; with no
-/// lives left, the room resets.
+/// Touching an enemy or orb costs a life and every ability, and respawns the
+/// hero; with no lives left, the room resets.
 fn hero_hits(
     mut commands: Commands,
     tuning: Res<EnemyTuning>,
     mut lives: ResMut<Lives>,
+    mut abilities: ResMut<Abilities>,
     mut reset: ResMut<ResetRoom>,
     enemies: Query<(&Position, &Enemy), Without<Hero>>,
     orbs: Query<(Entity, &Position), (With<Orb>, Without<Hero>)>,
@@ -515,6 +524,7 @@ fn hero_hits(
     }
 
     lives.0 = lives.0.saturating_sub(1);
+    *abilities = Abilities::default();
     if lives.0 == 0 {
         reset.0 = true;
     }
@@ -526,8 +536,9 @@ fn hero_hits(
     invulnerable.0 = tuning.respawn_invulnerability;
 }
 
-/// Clear and repopulate the room, refilling lives and energy.
-fn reset_room(
+/// Clear and repopulate the room, refilling lives and energy and removing
+/// pickups and abilities.
+pub fn reset_room(
     mut commands: Commands,
     tuning: Res<EnemyTuning>,
     mut reset: ResMut<ResetRoom>,
@@ -535,7 +546,8 @@ fn reset_room(
     mut kills: ResMut<Kills>,
     mut energy: ResMut<BeamEnergy>,
     mut waves: ResMut<WaveTimer>,
-    clear: Query<Entity, Or<(With<Enemy>, With<Orb>, With<Burst>)>>,
+    mut abilities: ResMut<Abilities>,
+    clear: Query<Entity, Or<(With<Enemy>, With<Orb>, With<Burst>, With<Pickup>)>>,
 ) {
     if !reset.0 {
         return;
@@ -551,6 +563,7 @@ fn reset_room(
     *kills = Kills::default();
     *energy = BeamEnergy::default();
     *waves = WaveTimer::default();
+    *abilities = Abilities::default();
 }
 
 fn age_bursts(mut commands: Commands, time: Res<Time>, mut bursts: Query<(Entity, &mut Burst)>) {

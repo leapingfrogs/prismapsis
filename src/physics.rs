@@ -22,6 +22,8 @@ pub struct BounceTuning {
     /// Whether hitting a wall also reverses the spin step (the chosen feel).
     /// When false, the next floor bounce sends the hero back towards the wall.
     pub wall_flips_spin: bool,
+    /// Vertical speed while hovering with anti-gravity (world units/s).
+    pub hover_speed: f32,
 }
 
 impl Default for BounceTuning {
@@ -31,6 +33,7 @@ impl Default for BounceTuning {
             apex_height: 320.0,
             speed_per_step: 90.0,
             wall_flips_spin: true,
+            hover_speed: 360.0,
         }
     }
 }
@@ -131,12 +134,7 @@ pub fn step(
 ) -> Contacts {
     let mut contacts = Contacts::default();
     let max_speed = body.vel.abs().max_element().max(tuning.bounce_speed());
-    let max_travel = (body.half * 0.5).max(f32::EPSILON);
-    // Bounded by speed, so the cast cannot truncate meaningfully.
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let substeps = ((max_speed * dt) / max_travel).ceil().max(1.0) as u32;
-    #[allow(clippy::cast_precision_loss)]
-    let sub_dt = dt / substeps as f32;
+    let (substeps, sub_dt) = substeps(body, max_speed, dt);
 
     for _ in 0..substeps {
         body.vel.y -= tuning.gravity * sub_dt;
@@ -150,6 +148,65 @@ pub fn step(
         resolve_y(body, *spin, tuning, solids, dy, &mut contacts);
     }
     contacts
+}
+
+/// Advance `body` by `dt` with anti-gravity: no gravity and no bouncing.
+///
+/// Spin sets horizontal speed directly and `vertical` (-1, 0 or 1) moves the
+/// hero down or up at `hover_speed`. Floors and ceilings stop it; walls
+/// still reverse it (and its spin, if tuned to).
+pub fn hover_step(
+    body: &mut Body,
+    spin: &mut i8,
+    vertical: i8,
+    tuning: &BounceTuning,
+    solids: &[Aabb],
+    dt: f32,
+) -> Contacts {
+    let mut contacts = Contacts::default();
+    body.vel = Vec2::new(
+        tuning.horizontal_speed(*spin),
+        f32::from(vertical) * tuning.hover_speed,
+    );
+    let (substeps, sub_dt) = substeps(body, body.vel.abs().max_element(), dt);
+
+    for _ in 0..substeps {
+        let dx = body.vel.x * sub_dt;
+        body.pos.x += dx;
+        resolve_x(body, spin, tuning, solids, dx, &mut contacts);
+
+        let dy = body.vel.y * sub_dt;
+        body.pos.y += dy;
+        if dy == 0.0 {
+            continue;
+        }
+        for solid in solids {
+            if !body.aabb().overlaps(solid) {
+                continue;
+            }
+            if dy < 0.0 {
+                body.pos.y = solid.max.y + body.half;
+                contacts.floor = true;
+            } else {
+                body.pos.y = solid.min.y - body.half;
+                contacts.ceiling = true;
+            }
+            body.vel.y = 0.0;
+        }
+    }
+    contacts
+}
+
+/// Split `dt` so a body moving at `max_speed` never travels more than half
+/// its size per sub-step, preventing it tunnelling through thin solids.
+fn substeps(body: &Body, max_speed: f32, dt: f32) -> (u32, f32) {
+    let max_travel = (body.half * 0.5).max(f32::EPSILON);
+    // Bounded by speed, so the cast cannot truncate meaningfully.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let substeps = ((max_speed * dt) / max_travel).ceil().max(1.0) as u32;
+    #[allow(clippy::cast_precision_loss)]
+    let sub_dt = dt / substeps as f32;
+    (substeps, sub_dt)
 }
 
 fn resolve_x(
@@ -468,6 +525,61 @@ mod tests {
         let mut spin = 0;
         step(&mut body, &mut spin, &tuning, &[wall], DT);
         assert!(body.pos.x < wall.min.x);
+    }
+
+    #[test]
+    fn hovering_moves_vertically_without_gravity() {
+        let tuning = BounceTuning::default();
+        let mut body = Body {
+            pos: Vec2::new(0.0, 300.0),
+            vel: Vec2::new(0.0, -900.0),
+            half: HALF,
+        };
+        let mut spin = 2;
+        hover_step(&mut body, &mut spin, 0, &tuning, &[floor()], 1.0);
+        // No fall, and spin alone sets horizontal speed.
+        assert!((body.pos.y - 300.0).abs() < 1e-3);
+        assert!((body.pos.x - tuning.horizontal_speed(2)).abs() < 1e-2);
+
+        hover_step(&mut body, &mut spin, 1, &tuning, &[floor()], 0.5);
+        assert!((body.pos.y - (300.0 + tuning.hover_speed * 0.5)).abs() < 1e-2);
+    }
+
+    #[test]
+    fn hovering_stops_at_floors_and_ceilings_without_bouncing() {
+        let tuning = BounceTuning::default();
+        let ceiling = Aabb::new(Vec2::new(-500.0, 400.0), Vec2::new(500.0, 450.0));
+        let mut body = Body {
+            pos: Vec2::new(0.0, 200.0),
+            vel: Vec2::ZERO,
+            half: HALF,
+        };
+        let mut spin = 0;
+        let solids = [floor(), ceiling];
+        let contacts = hover_step(&mut body, &mut spin, -1, &tuning, &solids, 2.0);
+        assert!(contacts.floor);
+        assert!((body.pos.y - HALF).abs() < 1e-3);
+        assert!(body.vel.y.abs() < f32::EPSILON);
+
+        let contacts = hover_step(&mut body, &mut spin, 1, &tuning, &solids, 2.0);
+        assert!(contacts.ceiling);
+        assert!((body.pos.y - (ceiling.min.y - HALF)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn hovering_into_a_wall_flips_spin() {
+        let tuning = BounceTuning::default();
+        let wall = Aabb::new(Vec2::new(100.0, 0.0), Vec2::new(150.0, 1000.0));
+        let mut body = Body {
+            pos: Vec2::new(60.0, 300.0),
+            vel: Vec2::ZERO,
+            half: HALF,
+        };
+        let mut spin = 3;
+        let contacts = hover_step(&mut body, &mut spin, 0, &tuning, &[wall], 0.5);
+        assert!(contacts.wall);
+        assert_eq!(spin, -3);
+        assert!(body.pos.x <= wall.min.x - HALF);
     }
 
     #[test]

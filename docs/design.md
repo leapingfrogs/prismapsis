@@ -37,9 +37,10 @@ starting points to be adjusted in play.
 - The prism **absorbs light** it sweeps through.
 - Controls: hold **Shift** (gamepad **left trigger**) to freeze. It
   brightens while frozen, and its tip always points away from the hero.
-- While frozen, **Up / W** (d-pad up) nudges it anticlockwise and
-  **Down / S** (d-pad down) clockwise, slowly, for precise positioning in
-  puzzles. The nudge keys do nothing while it orbits.
+- While frozen, **Q** (gamepad **West**) nudges it anticlockwise and
+  **E** (gamepad **East**) clockwise, slowly, for precise positioning in
+  puzzles. The nudge keys do nothing while it orbits. (Nudging moved off
+  up/down so those keys can steer the hero with anti-gravity.)
 - It currently **passes through solids**; whether walls should block it is
   open until light and shooting are in.
 - Starting tuning: orbit radius 90, 0.6 revolutions per second
@@ -72,8 +73,8 @@ starting points to be adjusted in play.
   rules (e.g. the beam colour deciding which light an enemy drops) are
   decided with light collection in iteration 5.
 - Power-ups map onto the beam: rear shot adds a backwards beam, spread
-  widens the split fan, rapid fire becomes faster recharge or lower drain,
-  and piercing lets beams pass through enemies.
+  fans each beam into three, rapid fire speeds up damage ticks and
+  recharging, and piercing lets beams pass through enemies.
 
 ## Light and the spectrum
 
@@ -100,8 +101,8 @@ starting points to be adjusted in play.
   shield and freezing it in place covers one side. (The mirror-face
   power-up upgrades this from blocking to reflecting.)
 - Enemy shots are stopped by solids.
-- **On defeat**, enemies burst and leave nothing for now. Power-up drops
-  arrive in iteration 4 and light in iteration 5.
+- **On defeat**, enemies burst and may leave a power-up (see below). Light
+  arrives in iteration 5.
 
 ### First enemy types
 
@@ -122,22 +123,29 @@ starting points to be adjusted in play.
   whether it is worth the detour.
 - Drops **favour abilities the hero doesn't have yet**, so a fresh life
   rebuilds quickly; once everything is collected, drops fall back to
-  weighted random.
+  any power-up at random.
 
 ### Abilities
 
-| Ability | Effect |
-|---------|--------|
-| Anti-gravity | Gravity stops and bouncing ends: up/down moves the hero directly, while horizontal speed still comes from the spin steps. For narrow spaces and precise positioning. Lasts until death. |
-| Rear shot | Fire backwards as well as forwards. |
-| Spread fire | Each shot fans out into several. |
-| Rapid fire | Higher fire rate. |
-| Piercing shots | Shots pass through enemies. |
-| Mirror face | Upgrades the prism from blocking enemy shots to **reflecting** them back at enemies. |
-| Light nova | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). |
+| Ability | Glyph | Effect |
+|---------|-------|--------|
+| Anti-gravity | Arrow over a line (violet) | Gravity stops and bouncing ends: **Up/W and Down/S** (d-pad) move the hero directly, while horizontal speed still comes from the spin steps. Floors and ceilings stop it instead of bouncing it. For narrow spaces and precise positioning. |
+| Rear shot | Double arrow (orange) | A second beam fires backwards. |
+| Spread fire | Three rays (green) | Each beam fans into three, 12° apart. |
+| Rapid fire | Fast-forward (yellow) | Damage ticks and recharge are 1.6× faster. |
+| Piercing | Line through a ring (blue) | Beams pass through enemies, hitting everything up to the next wall or the prism. |
+| Mirror face | *Later* | Upgrades the prism from blocking enemy shots to **reflecting** them back at enemies. |
+| Light nova | *Later* | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). Needs its own button. |
 
 Weapon power-ups are **separate pickups that stack**: rear shot, spread,
-rapid fire and piercing all apply together once collected.
+rapid fire and piercing all apply together once collected. With rear shot
+and spread together the hero fires six beams, each of which can split
+through the prism. A beam touching an enemy several times still deals one
+tick.
+
+Pickups are a coloured ring around a white glyph. They pulse gently and
+blink faster during their last 2 s. Collected abilities show as coloured
+bars under the life pips.
 
 ### Beam energy as a power-up lever
 
@@ -148,9 +156,9 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 - **Energy-hungry abilities**, where stronger weapons cost more to use.
   For example, rear shot or piercing could raise the drain rate while
   active, so collecting more power trades against how long you can fire.
-- To decide when iteration 4 designs the pickups: whether costly abilities
-  are always on once collected, or toggled so the player chooses when to
-  pay for them.
+- **Decided in iteration 4:** collected abilities are always on and cost no
+  extra energy. Balance comes from drop rates for now; energy costs can be
+  added later if stacked weapons feel too strong.
 
 ## Levels
 
@@ -181,8 +189,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 - Can secondary colours (yellow, cyan, magenta) come from enemies directly, or
   only from mixing?
 - What does white light unlock?
-- Drop chance and how long a drop stays: to be set by playtesting
-  (starting guess: 20% and 8 s).
+- Drop chance and how long a drop stays: tune by playtesting (currently
+  20% and 8 s, adjustable in the dev panel).
 
 ## Iteration plan
 
@@ -192,7 +200,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 | 2 | Prism | Auto-orbit, hold to freeze, orbit radius and speed tuning. |
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
-| 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, weapon upgrades, mirror face, light nova. |
+| 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
+| 4b | More power-ups | Mirror face, light nova, beam energy upgrades. |
 | 5 | Light and colour | Absorbing light, additive mixing, colour-gated platforms and doors. |
 | 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |
 | 7 | Game loop | Menus, pause, game over, score, audio. |

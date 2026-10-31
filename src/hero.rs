@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use crate::level::Solid;
 use crate::physics::{self, Body, BounceTuning};
+use crate::powerup::{Abilities, PowerUp};
 
 /// Collision half-size of the hero, in world units.
 pub const HERO_RADIUS: f32 = 24.0;
@@ -106,10 +107,33 @@ pub fn spin_input(
     }
 }
 
-/// Fixed-timestep bounce movement against all solids.
+/// Vertical input for anti-gravity hovering: 1 up, -1 down, 0 neither.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HoverInput(pub i8);
+
+/// Up/W and Down/S (or the d-pad) steer the hero while it has anti-gravity.
+pub fn hover_input(
+    keys: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    mut hover: ResMut<HoverInput>,
+) {
+    let pad_held = |button| gamepads.iter().any(|pad: &Gamepad| pad.pressed(button));
+    let up = keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) || pad_held(GamepadButton::DPadUp);
+    let down =
+        keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) || pad_held(GamepadButton::DPadDown);
+    let direction = i8::from(up) - i8::from(down);
+    if hover.0 != direction {
+        hover.0 = direction;
+    }
+}
+
+/// Fixed-timestep movement against all solids: bouncing normally, or
+/// hovering with anti-gravity.
 pub fn move_hero(
     time: Res<Time>,
     tuning: Res<BounceTuning>,
+    abilities: Res<Abilities>,
+    hover: Res<HoverInput>,
     solids: Query<&Solid>,
     mut heroes: Query<
         (
@@ -129,7 +153,12 @@ pub fn move_hero(
             vel: vel.0,
             half: HERO_RADIUS,
         };
-        physics::step(&mut body, &mut spin.0, &tuning, &solids, time.delta_secs());
+        let dt = time.delta_secs();
+        if abilities.has(PowerUp::AntiGravity) {
+            physics::hover_step(&mut body, &mut spin.0, hover.0, &tuning, &solids, dt);
+        } else {
+            physics::step(&mut body, &mut spin.0, &tuning, &solids, dt);
+        }
         pos.0 = body.pos;
         vel.0 = body.vel;
     }
@@ -202,5 +231,62 @@ mod tests {
             press(&mut app, KeyCode::ArrowLeft);
         }
         assert_eq!(hero_spin(&mut app), -physics::MAX_SPIN);
+    }
+
+    fn sim_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                std::time::Duration::from_millis(16),
+            ))
+            .add_plugins(crate::SimulationPlugin);
+        app.update();
+        app
+    }
+
+    fn hero_y(app: &mut App) -> f32 {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&Position, With<Hero>>()
+            .single(world)
+            .unwrap()
+            .0
+            .y
+    }
+
+    #[test]
+    fn anti_gravity_lets_up_and_down_steer_the_hero() {
+        let mut app = sim_app();
+        app.world_mut()
+            .resource_mut::<Abilities>()
+            .grant(PowerUp::AntiGravity);
+        app.update();
+        // Hovering in place: no fall.
+        let start = hero_y(&mut app);
+        for _ in 0..30 {
+            app.update();
+        }
+        assert!((hero_y(&mut app) - start).abs() < 1e-3);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ArrowUp);
+        for _ in 0..30 {
+            app.update();
+        }
+        let raised = hero_y(&mut app);
+        assert!(raised > start + 100.0, "up should raise the hero");
+
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(KeyCode::ArrowUp);
+        keys.press(KeyCode::KeyS);
+        for _ in 0..30 {
+            app.update();
+        }
+        assert!(
+            hero_y(&mut app) < raised - 100.0,
+            "down should lower the hero"
+        );
     }
 }

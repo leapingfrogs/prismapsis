@@ -11,6 +11,7 @@ use crate::enemy::{Enemy, HIT_FLASH};
 use crate::hero::{Facing, HERO_RADIUS, Hero, Position, update_facing};
 use crate::level::Solid;
 use crate::physics::{Aabb, ray_aabb, ray_circle};
+use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
 /// Longest a beam can be if it hits nothing (world units).
@@ -149,8 +150,17 @@ enum Hit {
     Prism,
 }
 
-/// Nearest thing along a ray, and the distance to it.
-fn nearest_hit(origin: Vec2, dir: Vec2, scene: &RayScene, prism: Option<Vec2>) -> (f32, Hit) {
+/// Cast a ray, returning where it stops and what stopped it, and adding the
+/// targets it hit to `hits`. Targets stop the ray unless `piercing`, in which
+/// case it hits every target before the solid or prism that stops it.
+fn cast(
+    origin: Vec2,
+    dir: Vec2,
+    scene: &RayScene,
+    prism: Option<Vec2>,
+    piercing: bool,
+    hits: &mut Vec<usize>,
+) -> (f32, Hit) {
     let mut best = (MAX_BEAM_LENGTH, Hit::Nothing);
     let mut consider = |t: Option<f32>, hit| {
         if let Some(t) = t.filter(|&t| t < best.0) {
@@ -160,11 +170,25 @@ fn nearest_hit(origin: Vec2, dir: Vec2, scene: &RayScene, prism: Option<Vec2>) -
     for solid in &scene.solids {
         consider(ray_aabb(origin, dir, solid), Hit::Solid);
     }
-    for (i, &(center, radius)) in scene.targets.iter().enumerate() {
-        consider(ray_circle(origin, dir, center, radius), Hit::Target(i));
-    }
     if let Some(center) = prism {
         consider(ray_circle(origin, dir, center, PRISM_RADIUS), Hit::Prism);
+    }
+    let target_hits = scene
+        .targets
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &(center, radius))| {
+            ray_circle(origin, dir, center, radius).map(|t| (t, i))
+        });
+    if piercing {
+        hits.extend(target_hits.filter(|&(t, _)| t < best.0).map(|(_, i)| i));
+        return best;
+    }
+    for (t, i) in target_hits {
+        consider(Some(t), Hit::Target(i));
+    }
+    if let Hit::Target(i) = best.1 {
+        hits.push(i);
     }
     best
 }
@@ -174,6 +198,7 @@ fn nearest_hit(origin: Vec2, dir: Vec2, scene: &RayScene, prism: Option<Vec2>) -
 /// If it crosses the prism at `prism`, the white beam ends there and three
 /// coloured beams fan out from the prism's far side, centred on the
 /// direction from `hero` to the prism. Split beams don't re-enter the prism.
+/// Targets stop each beam unless `piercing`.
 #[must_use]
 pub fn trace_beam(
     origin: Vec2,
@@ -182,40 +207,110 @@ pub fn trace_beam(
     prism: Option<Vec2>,
     scene: &RayScene,
     split_angle: f32,
+    piercing: bool,
 ) -> BeamTrace {
     let mut trace = BeamTrace::default();
-    let (t, hit) = nearest_hit(origin, dir, scene, prism);
+    let (t, hit) = cast(origin, dir, scene, prism, piercing, &mut trace.hit_targets);
     trace
         .segments
         .push((origin, origin + dir * t, BeamColour::White));
-    match hit {
-        Hit::Target(i) => trace.hit_targets.push(i),
-        Hit::Prism => {
-            let Some(center) = prism else {
-                return trace;
-            };
-            let outward = (center - hero).normalize_or(dir);
-            let spread = split_angle.to_radians();
-            for (angle, colour) in [
-                (spread, BeamColour::Red),
-                (0.0, BeamColour::Green),
-                (-spread, BeamColour::Blue),
-            ] {
-                let split_dir = Vec2::from_angle(angle).rotate(outward);
-                let start = center + split_dir * PRISM_RADIUS;
-                let (t, hit) = nearest_hit(start, split_dir, scene, None);
-                trace.segments.push((start, start + split_dir * t, colour));
-                if let Hit::Target(i) = hit {
-                    trace.hit_targets.push(i);
-                }
-            }
-        }
-        Hit::Nothing | Hit::Solid => {}
+    let (Hit::Prism, Some(center)) = (hit, prism) else {
+        return trace;
+    };
+    let outward = (center - hero).normalize_or(dir);
+    let spread = split_angle.to_radians();
+    for (angle, colour) in [
+        (spread, BeamColour::Red),
+        (0.0, BeamColour::Green),
+        (-spread, BeamColour::Blue),
+    ] {
+        let split_dir = Vec2::from_angle(angle).rotate(outward);
+        let start = center + split_dir * PRISM_RADIUS;
+        let (t, _) = cast(
+            start,
+            split_dir,
+            scene,
+            None,
+            piercing,
+            &mut trace.hit_targets,
+        );
+        trace.segments.push((start, start + split_dir * t, colour));
     }
     trace
 }
 
-/// Trace the hero's beam from a hero at `hero` facing `facing`.
+/// How the hero's beam fires, as shaped by weapon power-ups.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct BeamLoadout {
+    /// Also fire backwards.
+    pub rear: bool,
+    /// Fan each beam into three, this many degrees apart.
+    pub spread: Option<f32>,
+    /// Beams pass through enemies.
+    pub piercing: bool,
+}
+
+impl BeamLoadout {
+    /// The loadout given the hero's `abilities`.
+    #[must_use]
+    pub fn from_abilities(abilities: Abilities, tuning: &PowerUpTuning) -> Self {
+        Self {
+            rear: abilities.has(PowerUp::RearShot),
+            spread: abilities
+                .has(PowerUp::Spread)
+                .then_some(tuning.spread_angle),
+            piercing: abilities.has(PowerUp::Piercing),
+        }
+    }
+
+    /// Directions the hero's beams leave in when facing `facing`.
+    #[must_use]
+    pub fn directions(&self, facing: Facing) -> Vec<Vec2> {
+        let forward = facing.direction();
+        let mains: &[Vec2] = if self.rear {
+            &[forward, -forward]
+        } else {
+            &[forward]
+        };
+        mains
+            .iter()
+            .flat_map(|&dir| {
+                self.spread.map_or_else(
+                    || vec![dir],
+                    |angle| {
+                        let angle = angle.to_radians();
+                        vec![
+                            dir,
+                            Vec2::from_angle(angle).rotate(dir),
+                            Vec2::from_angle(-angle).rotate(dir),
+                        ]
+                    },
+                )
+            })
+            .collect()
+    }
+}
+
+/// Beam tuning with power-ups applied: rapid fire speeds up damage ticks and
+/// recharging.
+#[must_use]
+pub fn boosted_tuning(
+    base: &BeamTuning,
+    abilities: Abilities,
+    powerups: &PowerUpTuning,
+) -> BeamTuning {
+    if !abilities.has(PowerUp::RapidFire) {
+        return base.clone();
+    }
+    BeamTuning {
+        damage_rate: base.damage_rate * powerups.rapid_fire_boost,
+        recharge_rate: base.recharge_rate * powerups.rapid_fire_boost,
+        ..base.clone()
+    }
+}
+
+/// Trace every beam from a hero at `hero` facing `facing`. Each target hit
+/// is listed once, however many beams touch it.
 #[must_use]
 pub fn trace_from_hero(
     hero: Vec2,
@@ -223,16 +318,25 @@ pub fn trace_from_hero(
     prism: Option<Vec2>,
     scene: &RayScene,
     split_angle: f32,
+    loadout: &BeamLoadout,
 ) -> BeamTrace {
-    let dir = facing.direction();
-    trace_beam(
-        hero + dir * HERO_RADIUS,
-        dir,
-        hero,
-        prism,
-        scene,
-        split_angle,
-    )
+    let mut trace = BeamTrace::default();
+    for dir in loadout.directions(facing) {
+        let beam = trace_beam(
+            hero + dir * HERO_RADIUS,
+            dir,
+            hero,
+            prism,
+            scene,
+            split_angle,
+            loadout.piercing,
+        );
+        trace.segments.extend(beam.segments);
+        trace.hit_targets.extend(beam.hit_targets);
+    }
+    trace.hit_targets.sort_unstable();
+    trace.hit_targets.dedup();
+    trace
 }
 
 /// Repeating timer for damage ticks while the beam is on.
@@ -285,20 +389,25 @@ fn fire_input(
 fn update_energy(
     time: Res<Time>,
     tuning: Res<BeamTuning>,
+    abilities: Res<Abilities>,
+    powerups: Res<PowerUpTuning>,
     held: Res<FireHeld>,
     mut energy: ResMut<BeamEnergy>,
 ) {
+    let tuning = boosted_tuning(&tuning, *abilities, &powerups);
     let next = step_energy(*energy, held.0, &tuning, time.delta_secs());
     if *energy != next {
         *energy = next;
     }
 }
 
-/// While firing, apply damage ticks to every enemy the beam touches.
+/// While firing, apply damage ticks to every enemy the beams touch.
 /// Defeating them (at zero health) is handled in `enemy`.
 pub fn damage_enemies(
     time: Res<Time>,
     tuning: Res<BeamTuning>,
+    abilities: Res<Abilities>,
+    powerups: Res<PowerUpTuning>,
     energy: Res<BeamEnergy>,
     mut timer: ResMut<DamageTimer>,
     heroes: Query<(&Position, &Facing), With<Hero>>,
@@ -310,6 +419,7 @@ pub fn damage_enemies(
         timer.0.reset();
         return;
     }
+    let tuning = boosted_tuning(&tuning, *abilities, &powerups);
     let period = std::time::Duration::from_secs_f32(1.0 / tuning.damage_rate.max(0.1));
     if timer.0.duration() != period {
         timer.0.set_duration(period);
@@ -327,7 +437,8 @@ pub fn damage_enemies(
         targets: enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
     };
     let prism = prisms.single().ok().map(|p| p.0);
-    let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle);
+    let loadout = BeamLoadout::from_abilities(*abilities, &powerups);
+    let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle, &loadout);
 
     // Same query, same order as the scene built above.
     let mut enemies: Vec<_> = enemies.iter_mut().map(|(_, e)| e).collect();
@@ -359,7 +470,7 @@ mod tests {
             solids: vec![wall_at(500.0), wall_at(300.0)],
             targets: vec![],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
         assert_eq!(trace.segments.len(), 1);
         let (start, end, colour) = trace.segments[0];
         assert_eq!(start, Vec2::ZERO);
@@ -377,7 +488,7 @@ mod tests {
                 (Vec2::new(200.0, 300.0), 20.0),
             ],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
         assert_eq!(trace.hit_targets, vec![0]);
         assert!((trace.segments[0].1.x - 180.0).abs() < 1e-3);
     }
@@ -391,6 +502,7 @@ mod tests {
             None,
             &RayScene::default(),
             SPLIT,
+            false,
         );
         assert!((trace.segments[0].1.x - MAX_BEAM_LENGTH).abs() < 1e-3);
     }
@@ -409,6 +521,7 @@ mod tests {
             Some(prism),
             &scene,
             SPLIT,
+            false,
         );
 
         let colours: Vec<_> = trace.segments.iter().map(|s| s.2).collect();
@@ -442,6 +555,7 @@ mod tests {
             Some(prism),
             &RayScene::default(),
             SPLIT,
+            false,
         );
         let green = trace.segments[2];
         let dir = (green.1 - green.0).normalize();
@@ -463,6 +577,7 @@ mod tests {
             Some(prism),
             &scene,
             SPLIT,
+            false,
         );
         assert_eq!(trace.hit_targets, vec![0]);
     }
@@ -476,15 +591,119 @@ mod tests {
             Some(Vec2::new(0.0, 90.0)),
             &RayScene::default(),
             SPLIT,
+            false,
         );
         assert_eq!(trace.segments.len(), 1);
     }
 
     #[test]
     fn trace_from_hero_starts_at_the_hero_edge_in_the_facing_direction() {
-        let trace = trace_from_hero(Vec2::ZERO, Facing(-1), None, &RayScene::default(), SPLIT);
+        let trace = trace_from_hero(
+            Vec2::ZERO,
+            Facing(-1),
+            None,
+            &RayScene::default(),
+            SPLIT,
+            &BeamLoadout::default(),
+        );
         assert_eq!(trace.segments[0].0, Vec2::new(-HERO_RADIUS, 0.0));
         assert!(trace.segments[0].1.x < -1000.0);
+    }
+
+    #[test]
+    fn piercing_beams_hit_every_target_up_to_the_wall() {
+        let scene = RayScene {
+            solids: vec![wall_at(500.0)],
+            targets: vec![
+                (Vec2::new(200.0, 0.0), 20.0),
+                (Vec2::new(350.0, 0.0), 20.0),
+                (Vec2::new(700.0, 0.0), 20.0),
+            ],
+        };
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, true);
+        assert_eq!(trace.hit_targets, vec![0, 1]);
+        assert!((trace.segments[0].1.x - 500.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn loadout_follows_abilities() {
+        let tuning = PowerUpTuning::default();
+        assert_eq!(
+            BeamLoadout::from_abilities(Abilities::default(), &tuning),
+            BeamLoadout::default()
+        );
+        let mut abilities = Abilities::default();
+        for power in [PowerUp::RearShot, PowerUp::Spread, PowerUp::Piercing] {
+            abilities.grant(power);
+        }
+        let loadout = BeamLoadout::from_abilities(abilities, &tuning);
+        assert!(loadout.rear && loadout.piercing);
+        assert_eq!(loadout.spread, Some(tuning.spread_angle));
+    }
+
+    #[test]
+    fn rear_shot_and_spread_add_beam_directions() {
+        let facing = Facing(1);
+        assert_eq!(BeamLoadout::default().directions(facing), vec![Vec2::X]);
+
+        let rear = BeamLoadout {
+            rear: true,
+            ..default()
+        };
+        assert_eq!(rear.directions(facing), vec![Vec2::X, Vec2::NEG_X]);
+
+        let both = BeamLoadout {
+            rear: true,
+            spread: Some(10.0),
+            piercing: false,
+        };
+        let dirs = both.directions(facing);
+        assert_eq!(dirs.len(), 6);
+        assert_eq!(dirs.iter().filter(|d| d.x > 0.0).count(), 3);
+        assert!((dirs[1].to_angle() - 10f32.to_radians()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn rear_shot_hits_targets_behind_and_each_target_counts_once() {
+        let scene = RayScene {
+            solids: vec![],
+            targets: vec![
+                (Vec2::new(-300.0, 0.0), 20.0),
+                (Vec2::new(300.0, 0.0), 40.0),
+            ],
+        };
+        let forward_only = trace_from_hero(
+            Vec2::ZERO,
+            Facing(1),
+            None,
+            &scene,
+            SPLIT,
+            &BeamLoadout::default(),
+        );
+        assert_eq!(forward_only.hit_targets, vec![1]);
+
+        // Spread's three forward beams all reach the big target ahead.
+        let loadout = BeamLoadout {
+            rear: true,
+            spread: Some(2.0),
+            piercing: false,
+        };
+        let trace = trace_from_hero(Vec2::ZERO, Facing(1), None, &scene, SPLIT, &loadout);
+        assert_eq!(trace.hit_targets, vec![0, 1]);
+        assert_eq!(trace.segments.len(), 6);
+    }
+
+    #[test]
+    fn rapid_fire_boosts_damage_and_recharge() {
+        let base = BeamTuning::default();
+        let powerups = PowerUpTuning::default();
+        assert_eq!(boosted_tuning(&base, Abilities::default(), &powerups), base);
+        let mut abilities = Abilities::default();
+        abilities.grant(PowerUp::RapidFire);
+        let boosted = boosted_tuning(&base, abilities, &powerups);
+        assert!(boosted.damage_rate > base.damage_rate);
+        assert!(boosted.recharge_rate > base.recharge_rate);
+        assert!((boosted.drain_rate - base.drain_rate).abs() < f32::EPSILON);
     }
 
     const DT: f32 = 0.1;
