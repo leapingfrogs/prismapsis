@@ -15,6 +15,7 @@ pub mod enemy;
 pub mod hero;
 pub mod level;
 pub mod physics;
+pub mod powerup;
 pub mod prism;
 pub mod render;
 
@@ -38,6 +39,8 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(BACKGROUND))
+            // Different drops each run; tests keep the fixed default seed.
+            .insert_resource(powerup::DropRng::seeded(time_seed()))
             .add_plugins((SimulationPlugin, render::PresentationPlugin));
         #[cfg(feature = "dev")]
         app.add_plugins(dev_tools::DevToolsPlugin);
@@ -54,13 +57,31 @@ impl Plugin for SimulationPlugin {
             .init_resource::<physics::BounceTuning>()
             .register_type::<physics::BounceTuning>()
             .add_systems(Startup, (level::spawn_test_room, hero::spawn_hero))
-            .add_systems(Update, hero::spin_input)
+            .init_resource::<hero::HoverInput>()
+            .add_systems(Update, (hero::spin_input, hero::hover_input))
             .add_systems(
                 FixedUpdate,
                 (hero::move_hero, hero::update_facing.after(hero::move_hero)),
             )
-            .add_plugins((prism::PrismPlugin, beam::BeamPlugin, enemy::EnemyPlugin));
+            .add_plugins((
+                prism::PrismPlugin,
+                beam::BeamPlugin,
+                enemy::EnemyPlugin,
+                powerup::PowerUpPlugin,
+            ));
     }
+}
+
+/// A seed from the clock, for unpredictable drops between runs.
+fn time_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        // Only the low bits matter for a seed.
+        .map_or(1, |d| {
+            #[allow(clippy::cast_possible_truncation)]
+            let nanos = d.as_nanos() as u64;
+            nanos
+        })
 }
 
 /// Configuration for the primary window. With `fullscreen`, the game starts

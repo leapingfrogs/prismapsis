@@ -5,13 +5,16 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
-use crate::beam::{BeamColour, BeamEnergy, BeamTrace, BeamTuning, RayScene, trace_from_hero};
+use crate::beam::{
+    BeamColour, BeamEnergy, BeamLoadout, BeamTrace, BeamTuning, RayScene, trace_from_hero,
+};
 use crate::enemy::{
     BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, ORB_RADIUS, Orb, STARTING_LIVES,
 };
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{RoomBounds, Solid};
 use crate::physics::BounceTuning;
+use crate::powerup::{Abilities, PICKUP_RADIUS, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
 use std::f32::consts::FRAC_PI_2;
 
@@ -37,6 +40,7 @@ impl Plugin for PresentationPlugin {
                 spawn_beam_visuals,
                 spawn_energy_bar,
                 spawn_life_pips,
+                spawn_ability_pips,
             ),
         )
         .add_systems(
@@ -61,7 +65,8 @@ impl Plugin for PresentationPlugin {
                 blink_hero,
                 update_life_pips,
             ),
-        );
+        )
+        .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips));
     }
 }
 
@@ -223,36 +228,60 @@ pub const fn beam_colour(colour: BeamColour) -> Color {
     }
 }
 
-/// One of the four reusable beam pieces, in trace order: white, then red,
-/// green and blue when split.
+/// One of the reusable beam pieces, by index into the current trace.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BeamVisual(pub usize);
 
-const BEAM_VISUAL_COLOURS: [BeamColour; 4] = [
-    BeamColour::White,
-    BeamColour::Red,
-    BeamColour::Green,
-    BeamColour::Blue,
-];
+/// Most pieces a trace can have: forward and rear beams, each fanned into
+/// three by spread, each split into white plus three colours by the prism.
+pub const MAX_BEAM_PIECES: usize = 2 * 3 * 4;
 
-/// Spawn the beam pieces once, hidden; `draw_beam` places and shows them.
+/// One material per beam colour, shared by the pieces.
+#[derive(Resource, Debug)]
+struct BeamMaterials {
+    white: Handle<ColorMaterial>,
+    red: Handle<ColorMaterial>,
+    green: Handle<ColorMaterial>,
+    blue: Handle<ColorMaterial>,
+}
+
+impl BeamMaterials {
+    const fn get(&self, colour: BeamColour) -> &Handle<ColorMaterial> {
+        match colour {
+            BeamColour::White => &self.white,
+            BeamColour::Red => &self.red,
+            BeamColour::Green => &self.green,
+            BeamColour::Blue => &self.blue,
+        }
+    }
+}
+
+/// Spawn the beam pieces once, hidden; `draw_beam` places, colours and
+/// shows them.
 fn spawn_beam_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
+    let beam_materials = BeamMaterials {
+        white: materials.add(beam_colour(BeamColour::White)),
+        red: materials.add(beam_colour(BeamColour::Red)),
+        green: materials.add(beam_colour(BeamColour::Green)),
+        blue: materials.add(beam_colour(BeamColour::Blue)),
+    };
     // A unit square, stretched to each piece's length and width.
     let mesh = meshes.add(Rectangle::new(1.0, 1.0));
-    for (index, colour) in BEAM_VISUAL_COLOURS.into_iter().enumerate() {
+    for index in 0..MAX_BEAM_PIECES {
         commands.spawn((
-            Name::new(format!("Beam {colour:?}")),
+            Name::new(format!("Beam piece {index}")),
             BeamVisual(index),
             Mesh2d(mesh.clone()),
-            MeshMaterial2d(materials.add(beam_colour(colour))),
+            MeshMaterial2d(beam_materials.white.clone()),
             Transform::default(),
             Visibility::Hidden,
         ));
     }
+    commands.insert_resource(beam_materials);
 }
 
 /// While firing, trace the beam from the hero's and prism's drawn
@@ -261,15 +290,26 @@ fn spawn_beam_visuals(
 fn draw_beam(
     energy: Res<BeamEnergy>,
     tuning: Res<BeamTuning>,
+    abilities: Res<Abilities>,
+    powerups: Res<PowerUpTuning>,
+    beam_materials: Option<Res<BeamMaterials>>,
     heroes: Query<(&Transform, &Facing), (With<Hero>, Without<BeamVisual>)>,
     prisms: Query<&Transform, (With<Prism>, Without<Hero>, Without<BeamVisual>)>,
     solids: Query<&Solid>,
     enemies: Query<(&Position, &Enemy)>,
     mut visuals: Query<
-        (&BeamVisual, &mut Transform, &mut Visibility),
+        (
+            &BeamVisual,
+            &mut Transform,
+            &mut Visibility,
+            &mut MeshMaterial2d<ColorMaterial>,
+        ),
         (Without<Hero>, Without<Prism>),
     >,
 ) {
+    let Some(beam_materials) = beam_materials else {
+        return;
+    };
     let trace = match heroes.single() {
         Ok((hero, facing)) if energy.firing => {
             let scene = RayScene {
@@ -283,15 +323,20 @@ fn draw_beam(
                 prism,
                 &scene,
                 tuning.split_angle,
+                &BeamLoadout::from_abilities(*abilities, &powerups),
             )
         }
         _ => BeamTrace::default(),
     };
-    for (visual, mut transform, mut visibility) in &mut visuals {
+    for (visual, mut transform, mut visibility, mut material) in &mut visuals {
         let Some(&(start, end, colour)) = trace.segments.get(visual.0) else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
+        let wanted = beam_materials.get(colour);
+        if material.0 != *wanted {
+            material.0 = wanted.clone();
+        }
         let width = if colour == BeamColour::White {
             WHITE_BEAM_WIDTH
         } else {
@@ -460,6 +505,194 @@ fn animate_bursts(
         if let Some(mut material) = materials.get_mut(&material.0) {
             material.color = BURST_COLOUR.with_alpha(1.0 - progress);
         }
+    }
+}
+
+const PICKUP_BACKDROP_COLOUR: Color = Color::srgba(0.05, 0.05, 0.1, 0.85);
+const GLYPH_COLOUR: Color = Color::srgb(1.0, 1.0, 1.0);
+
+/// Ring and HUD colour for each power-up.
+#[must_use]
+pub const fn power_up_colour(power: PowerUp) -> Color {
+    match power {
+        PowerUp::AntiGravity => Color::srgb(0.72, 0.5, 1.0),
+        PowerUp::RearShot => Color::srgb(1.0, 0.6, 0.25),
+        PowerUp::Spread => Color::srgb(0.45, 0.95, 0.55),
+        PowerUp::RapidFire => Color::srgb(1.0, 0.9, 0.3),
+        PowerUp::Piercing => Color::srgb(0.35, 0.75, 1.0),
+    }
+}
+
+/// A simple shape in a pickup's glyph.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GlyphPart {
+    /// A triangle of this size, pointing along +x before rotation.
+    Arrowhead(f32),
+    /// A bar of this length and width, along +x before rotation.
+    Bar(f32, f32),
+    /// A ring of this outer radius.
+    Ring(f32),
+}
+
+/// The shapes that make up each power-up's glyph, with where they sit
+/// (offset and rotation in radians) inside the pickup ring.
+#[must_use]
+pub fn glyph_parts(power: PowerUp) -> Vec<(GlyphPart, Vec2, f32)> {
+    use std::f32::consts::PI;
+    let s = PICKUP_RADIUS * 0.5;
+    match power {
+        // An arrow rising above a floor line: hovering.
+        PowerUp::AntiGravity => vec![
+            (
+                GlyphPart::Arrowhead(s * 0.8),
+                Vec2::new(0.0, s * 0.35),
+                FRAC_PI_2,
+            ),
+            (GlyphPart::Bar(s * 1.6, 3.0), Vec2::new(0.0, -s * 0.7), 0.0),
+        ],
+        // A double-headed arrow: firing both ways.
+        PowerUp::RearShot => vec![
+            (GlyphPart::Bar(s * 1.2, 3.0), Vec2::ZERO, 0.0),
+            (GlyphPart::Arrowhead(s * 0.6), Vec2::new(s * 0.7, 0.0), 0.0),
+            (GlyphPart::Arrowhead(s * 0.6), Vec2::new(-s * 0.7, 0.0), PI),
+        ],
+        // Three rays fanning out.
+        PowerUp::Spread => [-0.45f32, 0.0, 0.45]
+            .into_iter()
+            .map(|angle| {
+                let offset = Vec2::from_angle(angle) * s * 0.7 - Vec2::new(s * 0.6, 0.0);
+                (GlyphPart::Bar(s * 1.4, 3.0), offset, angle)
+            })
+            .collect(),
+        // Fast-forward: two arrowheads in a row.
+        PowerUp::RapidFire => vec![
+            (
+                GlyphPart::Arrowhead(s * 0.7),
+                Vec2::new(-s * 0.35, 0.0),
+                0.0,
+            ),
+            (GlyphPart::Arrowhead(s * 0.7), Vec2::new(s * 0.45, 0.0), 0.0),
+        ],
+        // A beam passing through a ring.
+        PowerUp::Piercing => vec![
+            (GlyphPart::Ring(s * 0.55), Vec2::ZERO, 0.0),
+            (GlyphPart::Bar(s * 1.9, 3.0), Vec2::ZERO, 0.0),
+        ],
+    }
+}
+
+fn glyph_mesh(part: GlyphPart) -> Mesh {
+    match part {
+        GlyphPart::Arrowhead(size) => Triangle2d::new(
+            Vec2::new(size * 0.6, 0.0),
+            Vec2::new(-size * 0.4, size * 0.55),
+            Vec2::new(-size * 0.4, -size * 0.55),
+        )
+        .into(),
+        GlyphPart::Bar(length, width) => Rectangle::new(length, width).into(),
+        GlyphPart::Ring(radius) => Annulus::new(radius - 3.0, radius).into(),
+    }
+}
+
+/// Pickups are a coloured ring around a white glyph naming the power-up.
+fn draw_pickups(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    pickups: Query<(Entity, &Position, &Pickup), Added<Pickup>>,
+) {
+    if pickups.is_empty() {
+        return;
+    }
+    let glyph_material = materials.add(GLYPH_COLOUR);
+    for (entity, pos, pickup) in &pickups {
+        let backdrop = commands
+            .spawn((
+                Mesh2d(meshes.add(circle_mesh(PICKUP_RADIUS * 0.85))),
+                MeshMaterial2d(materials.add(PICKUP_BACKDROP_COLOUR)),
+                Transform::from_xyz(0.0, 0.0, -0.1),
+            ))
+            .id();
+        commands.entity(entity).insert((
+            Mesh2d(meshes.add(Annulus::new(PICKUP_RADIUS * 0.82, PICKUP_RADIUS))),
+            MeshMaterial2d(materials.add(power_up_colour(pickup.power))),
+            Transform::from_translation(pos.0.extend(0.8)),
+            Visibility::default(),
+        ));
+        commands.entity(entity).add_child(backdrop);
+        for (part, offset, angle) in glyph_parts(pickup.power) {
+            let glyph = commands
+                .spawn((
+                    Mesh2d(meshes.add(glyph_mesh(part))),
+                    MeshMaterial2d(glyph_material.clone()),
+                    Transform::from_translation(offset.extend(0.1))
+                        .with_rotation(Quat::from_rotation_z(angle)),
+                ))
+                .id();
+            commands.entity(entity).add_child(glyph);
+        }
+    }
+}
+
+/// Pulse pickups gently, and blink them as they're about to vanish.
+fn animate_pickups(
+    tuning: Res<PowerUpTuning>,
+    mut pickups: Query<(&Pickup, &mut Transform, &mut Visibility)>,
+) {
+    for (pickup, mut transform, mut visibility) in &mut pickups {
+        let pulse = 1.0 + 0.06 * (pickup.age * 5.0).sin();
+        transform.scale = Vec3::new(pulse, pulse, 1.0);
+        let wanted = if pickup_shown(pickup.age, tuning.drop_lifetime) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        visibility.set_if_neq(wanted);
+    }
+}
+
+/// One HUD marker per power-up, shown while the hero has it.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AbilityPip(pub PowerUp);
+
+fn spawn_ability_pips(mut commands: Commands) {
+    commands
+        .spawn((
+            Name::new("Abilities"),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Vw(1.5),
+                top: Val::Vh(8.0),
+                column_gap: Val::Vh(0.8),
+                ..default()
+            },
+        ))
+        .with_children(|row| {
+            for power in PowerUp::ALL {
+                row.spawn((
+                    AbilityPip(power),
+                    Node {
+                        width: Val::Vh(2.4),
+                        height: Val::Vh(1.0),
+                        display: Display::None,
+                        ..default()
+                    },
+                    BackgroundColor(power_up_colour(power)),
+                ));
+            }
+        });
+}
+
+fn update_ability_pips(abilities: Res<Abilities>, mut pips: Query<(&AbilityPip, &mut Node)>) {
+    if !abilities.is_changed() {
+        return;
+    }
+    for (pip, mut node) in &mut pips {
+        node.display = if abilities.has(pip.0) {
+            Display::Flex
+        } else {
+            Display::None
+        };
     }
 }
 
@@ -777,6 +1010,101 @@ mod tests {
         app.update();
         app.update();
         assert_eq!(visible_beams(&mut app), 0);
+    }
+
+    #[test]
+    fn weapon_power_ups_draw_more_beams_in_their_colours() {
+        let mut app = presentation_app();
+        app.update();
+        {
+            let mut abilities = app.world_mut().resource_mut::<Abilities>();
+            abilities.grant(PowerUp::RearShot);
+            abilities.grant(PowerUp::Spread);
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        for _ in 0..5 {
+            app.update();
+        }
+        // Six white beams, plus three colours if one crosses the prism.
+        let shown = visible_beams(&mut app);
+        assert!(shown == 6 || shown == 9, "got {shown} beam pieces");
+        let white = app.world().resource::<BeamMaterials>().white.clone();
+        let world = app.world_mut();
+        let whites = world
+            .query::<(&Visibility, &MeshMaterial2d<ColorMaterial>)>()
+            .iter(world)
+            .filter(|(v, m)| **v == Visibility::Visible && m.0 == white)
+            .count();
+        assert_eq!(whites, 6);
+    }
+
+    #[test]
+    fn every_power_up_has_a_distinct_glyph() {
+        let glyphs: Vec<_> = PowerUp::ALL.into_iter().map(glyph_parts).collect();
+        assert!(glyphs.iter().all(|parts| !parts.is_empty()));
+        for (i, a) in glyphs.iter().enumerate() {
+            for b in &glyphs[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn pickups_are_drawn_and_collected_abilities_show_in_the_hud() {
+        let mut app = presentation_app();
+        app.update();
+        let pickup = app
+            .world_mut()
+            .spawn(crate::powerup::pickup_bundle(
+                PowerUp::Spread,
+                Vec2::new(4000.0, 900.0),
+            ))
+            .id();
+        app.update();
+        let glyph_parts_drawn = app.world().get::<Children>(pickup).map_or(0, Children::len);
+        assert_eq!(glyph_parts_drawn, 1 + glyph_parts(PowerUp::Spread).len());
+        assert!(app.world().get::<Mesh2d>(pickup).is_some());
+
+        let shown_pips = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query::<(&AbilityPip, &Node)>()
+                .iter(world)
+                .filter(|(_, node)| node.display != Display::None)
+                .map(|(pip, _)| pip.0)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(shown_pips(&mut app), Vec::<PowerUp>::new());
+        app.world_mut()
+            .resource_mut::<Abilities>()
+            .grant(PowerUp::Piercing);
+        app.update();
+        assert_eq!(shown_pips(&mut app), vec![PowerUp::Piercing]);
+    }
+
+    #[test]
+    fn pickups_blink_before_vanishing() {
+        let mut app = presentation_app();
+        app.update();
+        let lifetime = PowerUpTuning::default().drop_lifetime;
+        let pickup = app
+            .world_mut()
+            .spawn(crate::powerup::pickup_bundle(
+                PowerUp::RapidFire,
+                Vec2::new(4000.0, 900.0),
+            ))
+            .id();
+        let mut hidden = false;
+        // Small positive whole number of frames.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let frames = ((lifetime - 0.1) / 0.016) as usize;
+        for _ in 0..frames {
+            app.update();
+            hidden |= app.world().get::<Visibility>(pickup) == Some(&Visibility::Hidden);
+        }
+        assert!(hidden, "pickup should blink near the end");
     }
 
     #[test]

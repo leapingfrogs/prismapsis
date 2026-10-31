@@ -102,7 +102,7 @@ fn spawn_prism(mut commands: Commands, tuning: Res<PrismTuning>) {
 }
 
 /// Hold Shift (gamepad left trigger) to freeze the prism; while
-/// frozen, Up/W (d-pad up) nudges it anticlockwise and Down/S (d-pad down)
+/// frozen, Q (gamepad West) nudges it anticlockwise and E (gamepad East)
 /// clockwise.
 fn prism_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -113,10 +113,9 @@ fn prism_input(
     let pad_held = |button| gamepads.iter().any(|pad| pad.pressed(button));
     let held = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
         || pad_held(GamepadButton::LeftTrigger2);
-    let up = keys.any_pressed([KeyCode::ArrowUp, KeyCode::KeyW]) || pad_held(GamepadButton::DPadUp);
-    let down =
-        keys.any_pressed([KeyCode::ArrowDown, KeyCode::KeyS]) || pad_held(GamepadButton::DPadDown);
-    let direction = i8::from(up) - i8::from(down);
+    let anticlockwise = keys.pressed(KeyCode::KeyQ) || pad_held(GamepadButton::West);
+    let clockwise = keys.pressed(KeyCode::KeyE) || pad_held(GamepadButton::East);
+    let direction = i8::from(anticlockwise) - i8::from(clockwise);
 
     // Only write on change so change detection stays meaningful.
     if frozen.0 != held {
@@ -273,24 +272,24 @@ mod tests {
         app.update();
         let (_, _, start) = hero_and_prism(&mut app);
 
-        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::ArrowUp]);
+        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::KeyQ]);
         for _ in 0..30 {
             app.update();
         }
-        let (_, _, after_up) = hero_and_prism(&mut app);
+        let (_, _, after_q) = hero_and_prism(&mut app);
         assert!(
-            angle_delta(start, after_up) > 0.1,
-            "up should turn anticlockwise"
+            angle_delta(start, after_q) > 0.1,
+            "Q should turn anticlockwise"
         );
 
-        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::KeyS]);
+        hold(&mut app, &[KeyCode::ShiftLeft, KeyCode::KeyE]);
         for _ in 0..30 {
             app.update();
         }
-        let (_, _, after_down) = hero_and_prism(&mut app);
+        let (_, _, after_e) = hero_and_prism(&mut app);
         assert!(
-            angle_delta(after_up, after_down) < -0.1,
-            "down should turn clockwise"
+            angle_delta(after_q, after_e) < -0.1,
+            "E should turn clockwise"
         );
     }
 
@@ -300,7 +299,7 @@ mod tests {
         app.update();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::ArrowDown);
+            .press(KeyCode::KeyE);
         let (_, _, start) = hero_and_prism(&mut app);
         for _ in 0..30 {
             app.update();

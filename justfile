@@ -18,9 +18,10 @@ run *args:
 # game size (-w/-h) as well as the output size (-W/-H), or gamescope renders
 # at 1280x720 and upscales, e.g.:
 #   GAMESCOPE_ARGS="-f -W 3840 -H 2160 -w 3840 -h 2160 -r 60" just run-gamescope
+# Set MANGOAPP=1 to add the MangoHud overlay.
 run-gamescope *args:
     cargo build --features dev
-    env -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH gamescope --mangoapp ${GAMESCOPE_ARGS:-} -- env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" target/debug/prismapsis --fullscreen {{args}}
+    env -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH gamescope ${MANGOAPP:+--mangoapp} ${GAMESCOPE_ARGS:-} -- env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" target/debug/prismapsis --fullscreen {{args}}
 
 # Run the game with an optimised release build
 release *args:

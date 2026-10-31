@@ -1,5 +1,5 @@
 //! Developer tools, compiled only with the `dev` feature: a live tuning panel
-//! for bounce parameters. Toggle with F1; R resets the hero.
+//! for bounce parameters. Toggle with F1 or backtick; R resets the hero.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -10,6 +10,7 @@ use crate::beam::BeamTuning;
 use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
 use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::physics::{BounceTuning, MAX_SPIN};
+use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
 
 #[derive(Debug, Default)]
@@ -40,7 +41,7 @@ const PRESENT_MODES: [PresentMode; 6] = [
 ];
 
 fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<PanelVisible>) {
-    if keys.just_pressed(KeyCode::F1) {
+    if keys.any_just_pressed([KeyCode::F1, KeyCode::Backquote]) {
         visible.0 = !visible.0;
     }
 }
@@ -77,6 +78,8 @@ fn tuning_panel(
     prism_frozen: Res<PrismFrozen>,
     mut beam_tuning: ResMut<BeamTuning>,
     mut enemy_tuning: ResMut<EnemyTuning>,
+    mut powerup_tuning: ResMut<PowerUpTuning>,
+    mut abilities: ResMut<Abilities>,
     kills: Res<Kills>,
     lives: Res<Lives>,
     mut reset_room: ResMut<ResetRoom>,
@@ -89,39 +92,45 @@ fn tuning_panel(
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    egui::Window::new("Bounce tuning (F1)").show(ctx, |ui| {
-        movement_section(ui, &mut tuning);
-        ui.separator();
-        prism_section(ui, &mut prism_tuning, prism_frozen.0);
-        ui.separator();
-        beam_section(ui, &mut beam_tuning);
-        ui.separator();
-        enemy_section(ui, &mut enemy_tuning, *kills, *lives);
-        ui.horizontal(|ui| {
-            if ui.button("Reset tuning").clicked() {
-                *tuning = BounceTuning::default();
-                *prism_tuning = PrismTuning::default();
-                *beam_tuning = BeamTuning::default();
-                *enemy_tuning = EnemyTuning::default();
+    egui::Window::new("Tuning (F1 or `)")
+        .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+        .show(ctx, |ui| {
+            movement_section(ui, &mut tuning);
+            ui.separator();
+            prism_section(ui, &mut prism_tuning, prism_frozen.0);
+            ui.separator();
+            beam_section(ui, &mut beam_tuning);
+            ui.separator();
+            enemy_section(ui, &mut enemy_tuning, *kills, *lives);
+            ui.separator();
+            powerup_section(ui, &mut powerup_tuning, &mut abilities);
+            ui.horizontal(|ui| {
+                if ui.button("Reset tuning").clicked() {
+                    *tuning = BounceTuning::default();
+                    *prism_tuning = PrismTuning::default();
+                    *beam_tuning = BeamTuning::default();
+                    *enemy_tuning = EnemyTuning::default();
+                    *powerup_tuning = PowerUpTuning::default();
+                }
+                if ui.button("Reset room").clicked() {
+                    reset_room.0 = true;
+                }
+            });
+            ui.separator();
+            for (pos, vel, spin) in &heroes {
+                ui.label(format!("spin step: {:+} / ±{MAX_SPIN}", spin.0));
+                ui.label(format!("position: {:.0}, {:.0}", pos.0.x, pos.0.y));
+                ui.label(format!("velocity: {:.0}, {:.0}", vel.0.x, vel.0.y));
             }
-            if ui.button("Reset room").clicked() {
-                reset_room.0 = true;
+            ui.separator();
+            performance_section(ui, &diagnostics, &mut fixed_time);
+            if let Ok(window) = window.single_mut() {
+                window_section(ui, window);
             }
+            ui.label("←/→ or A/D: spin   R: reset hero");
+            ui.label("Space: fire   Shift: freeze prism   Q/E while frozen: nudge");
+            ui.label("↑/↓ or W/S: hover (with anti-gravity)");
         });
-        ui.separator();
-        for (pos, vel, spin) in &heroes {
-            ui.label(format!("spin step: {:+} / ±{MAX_SPIN}", spin.0));
-            ui.label(format!("position: {:.0}, {:.0}", pos.0.x, pos.0.y));
-            ui.label(format!("velocity: {:.0}, {:.0}", vel.0.x, vel.0.y));
-        }
-        ui.separator();
-        performance_section(ui, &diagnostics, &mut fixed_time);
-        if let Ok(window) = window.single_mut() {
-            window_section(ui, window);
-        }
-        ui.label("←/→ or A/D: spin   R: reset hero");
-        ui.label("Space: fire   Shift: freeze prism   ↑/↓ or W/S while frozen: nudge");
-    });
     Ok(())
 }
 
@@ -130,6 +139,7 @@ fn movement_section(ui: &mut egui::Ui, tuning: &mut BounceTuning) {
     ui.add(egui::Slider::new(&mut tuning.apex_height, 50.0..=900.0).text("apex height"));
     ui.add(egui::Slider::new(&mut tuning.speed_per_step, 10.0..=300.0).text("speed per step"));
     ui.checkbox(&mut tuning.wall_flips_spin, "walls flip spin");
+    ui.add(egui::Slider::new(&mut tuning.hover_speed, 50.0..=900.0).text("hover speed"));
 }
 
 fn prism_section(ui: &mut egui::Ui, tuning: &mut PrismTuning, frozen: bool) {
@@ -225,4 +235,23 @@ fn window_section(ui: &mut egui::Ui, mut window: Mut<Window>) {
     if mode != window.present_mode {
         window.present_mode = mode;
     }
+}
+
+fn powerup_section(ui: &mut egui::Ui, tuning: &mut PowerUpTuning, abilities: &mut Abilities) {
+    ui.add(egui::Slider::new(&mut tuning.drop_chance, 0.0..=1.0).text("drop chance"));
+    ui.add(egui::Slider::new(&mut tuning.drop_lifetime, 2.0..=20.0).text("drop lifetime (s)"));
+    ui.add(egui::Slider::new(&mut tuning.rapid_fire_boost, 1.0..=3.0).text("rapid fire boost"));
+    ui.add(egui::Slider::new(&mut tuning.spread_angle, 2.0..=45.0).text("spread angle (°)"));
+    ui.horizontal_wrapped(|ui| {
+        for power in PowerUp::ALL {
+            let mut has = abilities.has(power);
+            if ui.checkbox(&mut has, format!("{power:?}")).changed() {
+                if has {
+                    abilities.grant(power);
+                } else {
+                    abilities.revoke(power);
+                }
+            }
+        }
+    });
 }
