@@ -25,12 +25,14 @@ run-gamescope *args:
     cargo build --features dev
     env -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH gamescope ${MANGOAPP:+--mangoapp} ${GAMESCOPE_ARGS:-} -- env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" target/debug/prismapsis --fullscreen {{args}}
 
-# Check level files for problems (every level by default)
-level-check *files="assets/levels/*.toml":
+# Check level files for problems and that each can be finished (every
+# level by default)
+level-check *files:
     cargo run --locked --bin levels -- check {{files}}
 
-# Print level maps in colour
-level-show +files:
+# Print level maps in colour (every level by default; the campaign file
+# shows its levels in play order)
+level-show *files:
     cargo run --locked --bin levels -- show {{files}}
 
 # Regenerate the sound effects in assets/audio from tools/sfx

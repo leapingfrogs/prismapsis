@@ -1,0 +1,3 @@
+# The levels played in order, each a file in this directory. Finishing the
+# last one leads back to the first.
+levels = ["test_room.toml", "tower.toml"]

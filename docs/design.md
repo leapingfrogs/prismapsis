@@ -200,8 +200,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
   one screen tall (1080 units) and any width. Some are taller, so the camera
   follows on both axes.
 - **Fixed sequence.** Reaching the exit loads the next level, and the last
-  leads back to the first. For now the order is a list in `src/level/mod.rs`
-  (test room, then tower); a campaign file comes with generated levels.
+  leads back to the first. The order is listed in
+  `assets/levels/campaign.toml`.
   Playing one file with `--level` repeats it.
 - A level can override wave and light settings. Settings it leaves out go
   back to their defaults, so one level's settings don't carry into the next.
@@ -261,14 +261,54 @@ reads well in a terminal or text editor and is easy to generate.
 
 ### Level tooling
 
-- `just level-show <file>` prints a level with ANSI colours per hue.
+- `just level-show [file]...` prints levels with ANSI colours per hue:
+  every level by default, and `campaign.toml` shows its levels in play
+  order (`level-check` treats it the same way).
 - `just level-check` reports every problem in the level files, and a test
   runs the same checks in CI. It checks that every character is in the
   legend, that the level has one start and an exit, and that legend entries
   and settings make sense. Tracks will be checked once moving platforms
   exist.
-- A procedural generator that writes level files from a seed. Generated
-  levels supply the first campaign.
+- `just level-check` also proves each level can be finished; see "Level
+  generation".
+- `just levelgen` writes the generated levels from their seeds.
+
+### Level generation
+
+Generated levels make up the campaign. The generator runs offline and its
+output is committed; the game only ever loads level files.
+
+- **Seeded and reproducible.** `just levelgen` writes ordinary level files.
+  Each one starts with a comment naming its seed and parameters, and a check
+  regenerates every level and fails if a file differs. Generated files are
+  never edited by hand: change the seed or the parameters instead.
+- **`assets/levels/campaign.toml`** lists the levels in play order. The
+  test room and the tower are dev levels and test fixtures, played with
+  `--level`.
+- **Route first.** The generator lays a chain of platforms from the start
+  to the exit, each reachable from the last, then decorates around it.
+  Wide levels run sideways; an occasional tall level climbs.
+- **Comfortable jumps throughout.** Gaps stay within about 70% of the
+  hero's reach. Difficulty comes from elsewhere.
+- **Difficulty rises** with more colour gates, more enemy pressure (shorter
+  wave intervals, more lenses) and longer levels.
+- **Colours return primaries first.** Early levels gate on red, green and
+  blue; later ones on yellow, cyan and magenta, each needing its two
+  primaries. Lenses of a gate's colour sit before it, a checkpoint follows
+  it, and pickups go on side ledges hidden until a colour returns.
+- **A solvability checker** proves a level can be finished. It simulates
+  each bounce with the game's own physics: from every place the hero can
+  land, with every spin, to where it lands next. It searches those landings
+  together with which primaries are restored, since restoring a colour makes
+  its phantoms solid. A primary counts as restorable when the level's waves
+  include it, or when enough lens light is in the beam's reach. Picking up
+  anti-gravity lets the hero hover anywhere open. The level is solvable if
+  the exit can be touched with white restored. `just level-check` runs it
+  on every level, hand-made ones included.
+- **First campaign:** about 8 levels, mostly wide, some tall.
+- **Later:** hand-drawn set pieces spliced into the route, and the 6b tile
+  kinds; each tile kind brings its own reach rule to the checker and its
+  own placement to the generator.
 
 ## Damage
 
@@ -335,9 +375,6 @@ reads well in a terminal or text editor and is easy to generate.
 
 ## Open questions
 
-- Procedural generator: which constraints guarantee a level is completable
-  (reachable phantoms, enough enemies of each colour)?
-
 - Gauge size and light per enemy: tune by playtesting (starting at 10, with
   1 per mote and 4 per lens).
 - Drop chance and how long a drop stays: tune by playtesting (currently
@@ -357,6 +394,7 @@ reads well in a terminal or text editor and is easy to generate.
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |
 | 6b | Tile kinds | One-way, moving, crumbling and colour-breakable platforms; spring and mud bounce modifiers; mirror walls reflecting the beam. |
-| 6c | Campaign | Procedural level generator; a campaign file listing generated levels. |
+| 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
+| 6c-2 | Generator | Seeded route generator with colour gates, lenses, checkpoints and pickups; regenerate-and-compare check; a first campaign of about 8 generated levels. |
 | 7 | Game loop | Menus, pause, game over, score, music, audio settings. |
 | 8+ | 3D | To be designed. |
