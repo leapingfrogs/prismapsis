@@ -10,6 +10,7 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use crate::beam::BeamTuning;
 use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
 use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
+use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
@@ -42,6 +43,13 @@ impl Default for AuditionChoice {
     fn default() -> Self {
         Self(SoundId::MoteDefeat)
     }
+}
+
+/// The resources the light section of the panel edits.
+#[derive(SystemParam)]
+struct LightPanel<'w> {
+    tuning: ResMut<'w, LightTuning>,
+    spectrum: ResMut<'w, Spectrum>,
 }
 
 /// The resources the sound section of the panel edits.
@@ -101,7 +109,7 @@ fn tuning_panel(
     mut enemy_tuning: ResMut<EnemyTuning>,
     mut powerup_tuning: ResMut<PowerUpTuning>,
     mut abilities: ResMut<Abilities>,
-    mut sound: SoundPanel,
+    (mut sound, mut light): (SoundPanel, LightPanel),
     (kills, lives): (Res<Kills>, Res<Lives>),
     mut reset_room: ResMut<ResetRoom>,
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
@@ -127,6 +135,8 @@ fn tuning_panel(
             powerup_section(ui, &mut powerup_tuning, &mut abilities);
             ui.separator();
             sound_section(ui, &mut sound);
+            ui.separator();
+            light_section(ui, &mut light);
             ui.horizontal(|ui| {
                 if ui.button("Reset tuning").clicked() {
                     *tuning = BounceTuning::default();
@@ -135,6 +145,7 @@ fn tuning_panel(
                     *enemy_tuning = EnemyTuning::default();
                     *powerup_tuning = PowerUpTuning::default();
                     *sound.settings = SoundSettings::default();
+                    *light.tuning = LightTuning::default();
                 }
                 if ui.button("Reset room").clicked() {
                     reset_room.0 = true;
@@ -299,6 +310,29 @@ fn sound_section(ui: &mut egui::Ui, panel: &mut SoundPanel) {
             });
         if ui.button("Play").clicked() {
             auditions.0.push(choice.0);
+        }
+    });
+}
+
+fn light_section(ui: &mut egui::Ui, panel: &mut LightPanel) {
+    let LightPanel { tuning, spectrum } = panel;
+    ui.add(egui::Slider::new(&mut tuning.gauge_capacity, 1.0..=40.0).text("gauge capacity"));
+    ui.add(egui::Slider::new(&mut tuning.mote_light, 0.5..=10.0).text("light per mote"));
+    ui.add(egui::Slider::new(&mut tuning.lens_light, 0.5..=20.0).text("light per lens"));
+    ui.horizontal(|ui| {
+        for primary in Primary::ALL {
+            let i = primary.index();
+            let state = if spectrum.restored[i] {
+                "restored".to_owned()
+            } else {
+                format!("{:.1}", spectrum.gauges[i])
+            };
+            if ui.button(format!("{primary:?}: {state}")).clicked() {
+                spectrum.restore(primary, tuning.gauge_capacity);
+            }
+        }
+        if ui.button("Grey").clicked() {
+            **spectrum = Spectrum::default();
         }
     });
 }

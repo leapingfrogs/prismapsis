@@ -15,11 +15,13 @@ pub mod enemy;
 pub mod events;
 pub mod hero;
 pub mod level;
+pub mod light;
 pub mod physics;
 pub mod powerup;
 pub mod prism;
 pub mod render;
 pub mod sound;
+pub mod spectrum_view;
 
 /// Title shown on the game window.
 pub const WINDOW_TITLE: &str = "Prismapsis";
@@ -75,6 +77,7 @@ impl Plugin for SimulationPlugin {
                 beam::BeamPlugin,
                 enemy::EnemyPlugin,
                 powerup::PowerUpPlugin,
+                light::LightPlugin,
             ));
     }
 }

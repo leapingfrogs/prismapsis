@@ -13,6 +13,7 @@ use crate::enemy::{
 };
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{RoomBounds, Solid};
+use crate::light::{Colour, Hidden, Phantom, Primary};
 use crate::physics::BounceTuning;
 use crate::powerup::{Abilities, PICKUP_RADIUS, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
@@ -67,7 +68,8 @@ impl Plugin for PresentationPlugin {
                     update_life_pips,
                 ),
             )
-            .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips));
+            .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips))
+            .add_plugins(crate::spectrum_view::SpectrumViewPlugin);
     }
 }
 
@@ -169,17 +171,15 @@ fn draw_solids(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    solids: Query<(Entity, &Solid), Added<Solid>>,
+    // Phantoms draw themselves, even once solid.
+    solids: Query<(Entity, &Solid), (Added<Solid>, Without<Phantom>)>,
 ) {
-    if solids.is_empty() {
-        return;
-    }
-    let material = materials.add(SOLID_COLOUR);
     for (entity, solid) in &solids {
         let size = solid.0.size();
+        // Each has its own material, so colour can wash back per solid.
         commands.entity(entity).insert((
             Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(material.clone()),
+            MeshMaterial2d(materials.add(SOLID_COLOUR)),
             Transform::from_translation(solid.0.center().extend(0.0)),
         ));
     }
@@ -443,22 +443,36 @@ pub const fn enemy_colour(kind: EnemyKind) -> Color {
     }
 }
 
+/// An enemy's colour, showing the light it will release: motes glow in it,
+/// lens crystals are tinted by it.
+#[must_use]
+pub fn coloured_enemy(kind: EnemyKind, colour: Option<Primary>) -> Color {
+    let Some(colour) = colour else {
+        return enemy_colour(kind);
+    };
+    let light = crate::spectrum_view::hue_colour(colour.into());
+    match kind {
+        EnemyKind::Mote => light,
+        EnemyKind::Lens => LENS_COLOUR.mix(&light, 0.7),
+    }
+}
+
 /// Motes are small round sparks; lenses are hexagonal crystals. Each gets
 /// its own material so it can flash independently.
 fn draw_enemies(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    enemies: Query<(Entity, &Position, &Enemy), Added<Enemy>>,
+    enemies: Query<(Entity, &Position, &Enemy, Option<&Colour>), Added<Enemy>>,
 ) {
-    for (entity, pos, enemy) in &enemies {
+    for (entity, pos, enemy, colour) in &enemies {
         let mesh = match enemy.kind {
             EnemyKind::Mote => meshes.add(circle_mesh(enemy.radius())),
             EnemyKind::Lens => meshes.add(RegularPolygon::new(enemy.radius(), 6)),
         };
         commands.entity(entity).insert((
             Mesh2d(mesh),
-            MeshMaterial2d(materials.add(enemy_colour(enemy.kind))),
+            MeshMaterial2d(materials.add(coloured_enemy(enemy.kind, colour.map(|c| c.0)))),
             Transform::from_translation(pos.0.extend(0.5)),
         ));
     }
@@ -467,12 +481,13 @@ fn draw_enemies(
 /// Flash enemies towards white while their hit flash lasts.
 fn tint_enemies(
     mut materials: ResMut<Assets<ColorMaterial>>,
-    enemies: Query<(&Enemy, &MeshMaterial2d<ColorMaterial>), Changed<Enemy>>,
+    enemies: Query<(&Enemy, Option<&Colour>, &MeshMaterial2d<ColorMaterial>), Changed<Enemy>>,
 ) {
-    for (enemy, material) in &enemies {
+    for (enemy, colour, material) in &enemies {
         if let Some(mut material) = materials.get_mut(&material.0) {
             let flash = (enemy.flash / HIT_FLASH).clamp(0.0, 1.0);
-            material.color = enemy_colour(enemy.kind).mix(&ENEMY_HIT_COLOUR, flash);
+            let base = coloured_enemy(enemy.kind, colour.map(|c| c.0));
+            material.color = base.mix(&ENEMY_HIT_COLOUR, flash);
         }
     }
 }
@@ -651,12 +666,12 @@ fn draw_pickups(
 /// Pulse pickups gently, and blink them as they're about to vanish.
 fn animate_pickups(
     tuning: Res<PowerUpTuning>,
-    mut pickups: Query<(&Pickup, &mut Transform, &mut Visibility)>,
+    mut pickups: Query<(&Pickup, Has<Hidden>, &mut Transform, &mut Visibility)>,
 ) {
-    for (pickup, mut transform, mut visibility) in &mut pickups {
+    for (pickup, hidden, mut transform, mut visibility) in &mut pickups {
         let pulse = 1.0 + 0.06 * (pickup.age * 5.0).sin();
         transform.scale = Vec3::new(pulse, pulse, 1.0);
-        let wanted = if pickup_shown(pickup.age, tuning.drop_lifetime) {
+        let wanted = if !hidden && pickup_shown(pickup.age, tuning.drop_lifetime) {
             Visibility::Inherited
         } else {
             Visibility::Hidden

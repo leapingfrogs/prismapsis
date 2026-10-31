@@ -69,22 +69,53 @@ starting points to be adjusted in play.
   and don't re-enter the prism.
 - Because shots are horizontal, the prism only sits in the line of fire
   near the front or back of its orbit.
-- Beam colour is **cosmetic for now**: all beams deal the same damage. Colour
-  rules (e.g. the beam colour deciding which light an enemy drops) are
-  decided with light collection in iteration 5.
+- Beam colour is **cosmetic**: all beams deal the same damage, and an
+  enemy's own colour decides the light it releases (see below).
 - Power-ups map onto the beam: rear shot adds a backwards beam, spread
   fans each beam into three, rapid fire speeds up damage ticks and
   recharging, and piercing lets beams pass through enemies.
 
 ## Light and the spectrum
 
-- Enemies release **red, green or blue light**.
-- Light mixes **additively**, like real light:
-  red + green = yellow, green + blue = cyan, red + blue = magenta,
-  all three = white.
-- Restoring a colour makes **world elements of that hue solid or visible**:
-  platforms, doors and routes. Levels therefore gate progress by colour, and
-  areas are revisited once new colours are restored.
+- **Enemies have a colour**, red, green or blue, and release light of that
+  colour **automatically when defeated**. There is no collection step. Each
+  mote wave is a single colour, cycling red, green, blue. Placed lenses
+  have a colour set by the level.
+- Light fills **one gauge per primary colour**: a mote gives 1 unit and a
+  lens 4, and a gauge holds 10, so roughly 10 kills restore a colour.
+  These are tunable in the dev panel. A full gauge **restores** that colour.
+- Light mixes **additively**, like real light: red + green = yellow,
+  green + blue = cyan, red + blue = magenta, all three = white.
+  **Secondaries restore once both of their primaries are restored**, and
+  white once all three are. The order you restore colours is therefore a
+  choice, and secondaries give levels mid-progress gates.
+- Restored colours are **per level**: each level starts grey and has its own
+  spectrum to restore.
+- **Restoring white opens the level's exit.**
+- **Dying keeps restored colours but halves any gauge still filling.**
+- The beam's own colour stays **cosmetic**: an enemy's colour decides the
+  light it gives, whichever beam defeats it.
+
+### What restored colours do
+
+- **Phantom platforms turn solid.** Before their colour is restored they
+  are faint outlines the hero passes through; afterwards they are ledges to
+  bounce on, opening higher routes. They can be primary or secondary
+  coloured.
+- **Hidden things appear.** Pickups, routes or enemies drawn in a colour
+  are invisible until it is restored.
+- **The world floods with colour.** The level starts greyscale. Each
+  restored colour washes its shades into the background and scenery, with a
+  visible flood effect, until with all three the level is revealed in full
+  colour.
+
+### Sound
+
+- Light from a defeat plays its colour's note. Red, green and blue are the
+  root, third and fifth, matching the split beam's chord.
+- Restoring a colour plays a rising flourish, a secondary plays its two
+  notes together, and restoring white plays the full triad as the exit
+  opens.
 
 ## Enemies
 
@@ -221,11 +252,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 
 ## Open questions
 
-- Does stored light persist across lives, or reset at a checkpoint?
-- How are restored colours represented: per level, per world, or globally?
-- Can secondary colours (yellow, cyan, magenta) come from enemies directly, or
-  only from mixing?
-- What does white light unlock?
+- Gauge size and light per enemy: tune by playtesting (starting at 10, with
+  1 per mote and 4 per lens).
 - Drop chance and how long a drop stays: tune by playtesting (currently
   20% and 8 s, adjustable in the dev panel).
 
@@ -240,7 +268,7 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
 | 4b | More power-ups | Mirror face, light nova, beam energy upgrades. |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
-| 5 | Light and colour | Absorbing light, additive mixing, colour-gated platforms and doors. |
+| 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |
 | 7 | Game loop | Menus, pause, game over, score, music, audio settings. |
 | 8+ | 3D | To be designed. |
