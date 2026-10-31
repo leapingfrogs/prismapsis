@@ -244,9 +244,9 @@ fn reveal_hidden(
     }
 }
 
-/// With white restored, touching the exit completes the level, which for now
-/// restarts the test room.
-fn reach_exit(
+/// With white restored, touching the exit completes the level; `level` then
+/// moves on to the next one.
+pub fn reach_exit(
     spectrum: Res<Spectrum>,
     mut reset: ResMut<ResetRoom>,
     mut completed: ResMut<LevelsCompleted>,

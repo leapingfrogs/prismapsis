@@ -1,0 +1,127 @@
+# A tall level for trying the camera's vertical follow. Platforms climb in
+# steps the hero's bounce can reach; the red, green and blue ones are
+# phantoms, so each colour opens the next part of the climb. Anti-gravity
+# waits above the green platform once cyan returns.
+name = "Tower"
+
+map = '''
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+#                                 XXX  #
+#                                 XXX  #
+#                                 XXX  #
+#                      WWWWWWWWWWWWWWWW#
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#bbbbbbbbbbbbbbbb                      #
+#                                      #
+#                                      #
+#                                      #
+#                             a        #
+#                                      #
+#                      #################
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#gggggggggggggggg                      #
+#                                      #
+#                                      #
+#                                    K #
+#                             2      K #
+#                                    K #
+#                      #################
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#rrrrrrrrrrrrrrrr                      #
+#                                      #
+#                                      #
+#                                      #
+#                             1        #
+#                                      #
+#                      #################
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#                                      #
+#################                      #
+#                                      #
+#                                      #
+#                                      #
+#    @                                 #
+#                                      #
+GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+'''
+
+background = '''
+
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC        RRRR        MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC        YYYY        MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+        CC                    MM
+
+
+'''
+
+[legend]
+"1" = { lens = "red" }
+"2" = { lens = "blue" }
+"a" = { pickup = "anti-gravity", hidden = "cyan" }
+
+[waves]
+interval = 8

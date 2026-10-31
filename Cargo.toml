@@ -1,5 +1,6 @@
 [package]
 name = "prismapsis"
+default-run = "prismapsis"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.97.1"
@@ -15,6 +16,8 @@ dev = ["dep:bevy_egui"]
 # `wav` decodes the generated sound effects.
 bevy = { version = "0.20.1", features = ["wav"] }
 bevy_egui = { version = "0.43.1", optional = true }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
 
 [workspace]
 members = ["tools/sfx"]

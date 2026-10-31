@@ -12,7 +12,7 @@ use crate::enemy::{
     BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, ORB_RADIUS, Orb, STARTING_LIVES,
 };
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
-use crate::level::{RoomBounds, Solid};
+use crate::level::{Checkpoint, RoomBounds, Solid};
 use crate::light::{Colour, Hidden, Phantom, Primary};
 use crate::physics::BounceTuning;
 use crate::powerup::{Abilities, PICKUP_RADIUS, Pickup, PowerUp, PowerUpTuning, pickup_shown};
@@ -20,7 +20,7 @@ use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
 use std::f32::consts::FRAC_PI_2;
 
 /// Vertical extent of the view in world units, regardless of window size.
-pub const DESIGN_HEIGHT: f32 = 1080.0;
+pub const DESIGN_HEIGHT: f32 = crate::level::VIEW_HEIGHT;
 
 /// How quickly the camera catches up with the hero (per second).
 const CAMERA_FOLLOW_RATE: f32 = 6.0;
@@ -68,7 +68,16 @@ impl Plugin for PresentationPlugin {
                     update_life_pips,
                 ),
             )
-            .add_systems(Update, (draw_pickups, animate_pickups, update_ability_pips))
+            .add_systems(
+                Update,
+                (
+                    draw_pickups,
+                    animate_pickups,
+                    update_ability_pips,
+                    draw_checkpoints,
+                    light_checkpoints,
+                ),
+            )
             .add_plugins(crate::spectrum_view::SpectrumViewPlugin);
     }
 }
@@ -182,6 +191,65 @@ fn draw_solids(
             MeshMaterial2d(materials.add(SOLID_COLOUR)),
             Transform::from_translation(solid.0.center().extend(0.0)),
         ));
+    }
+}
+
+const CHECKPOINT_IDLE: Color = Color::srgb(0.45, 0.47, 0.55);
+const CHECKPOINT_ACTIVE: Color = Color::srgb(0.95, 0.95, 1.0);
+
+/// Each checkpoint's own material, so it can light up alone.
+#[derive(Component, Debug)]
+struct CheckpointMaterial(Handle<ColorMaterial>);
+
+/// Checkpoints are a slim post topped with a diamond, standing on the floor
+/// of their area.
+fn draw_checkpoints(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    checkpoints: Query<(Entity, &Checkpoint), Added<Checkpoint>>,
+) {
+    for (entity, checkpoint) in &checkpoints {
+        let material = materials.add(CHECKPOINT_IDLE);
+        let size = checkpoint.aabb.size();
+        let diamond = (size.x * 0.4).min(16.0);
+        let post = commands
+            .spawn((
+                Mesh2d(meshes.add(Rectangle::new(4.0, size.y - diamond))),
+                MeshMaterial2d(material.clone()),
+                Transform::from_xyz(0.0, -diamond / 2.0, 0.0),
+            ))
+            .id();
+        let top = commands
+            .spawn((
+                Mesh2d(meshes.add(RegularPolygon::new(diamond, 4))),
+                MeshMaterial2d(material.clone()),
+                Transform::from_xyz(0.0, size.y / 2.0 - diamond, 0.0),
+            ))
+            .id();
+        commands
+            .entity(entity)
+            .insert((
+                Transform::from_translation(checkpoint.aabb.center().extend(-0.5)),
+                Visibility::default(),
+                CheckpointMaterial(material),
+            ))
+            .add_children(&[post, top]);
+    }
+}
+
+fn light_checkpoints(
+    mut materials: ResMut<Assets<ColorMaterial>>,
+    checkpoints: Query<(&Checkpoint, &CheckpointMaterial), Changed<Checkpoint>>,
+) {
+    for (checkpoint, material) in &checkpoints {
+        if let Some(mut material) = materials.get_mut(&material.0) {
+            material.color = if checkpoint.active {
+                CHECKPOINT_ACTIVE
+            } else {
+                CHECKPOINT_IDLE
+            };
+        }
     }
 }
 
@@ -864,8 +932,7 @@ fn spin_hero_visual(
     }
 }
 
-/// Camera x eases towards the hero, kept inside the room; y shows the full
-/// room height.
+/// The camera eases towards the hero on both axes, kept inside the room.
 fn follow_hero(
     time: Res<Time>,
     bounds: Option<Res<RoomBounds>>,
@@ -876,28 +943,34 @@ fn follow_hero(
     let (Some(bounds), Ok(hero)) = (bounds, heroes.single()) else {
         return;
     };
-    let hero_x = hero.translation.x;
+    let hero = hero.translation.truncate();
     for (mut transform, projection) in &mut cameras {
-        let half_width = match projection {
-            Projection::Orthographic(ortho) => ortho.area.width() / 2.0,
-            _ => 0.0,
+        let half = match projection {
+            Projection::Orthographic(ortho) => ortho.area.size() / 2.0,
+            _ => Vec2::ZERO,
         };
-        let target_x = camera_target_x(hero_x, half_width, bounds.0.min.x, bounds.0.max.x);
+        let target = Vec2::new(
+            camera_target(hero.x, half.x, bounds.0.min.x, bounds.0.max.x),
+            camera_target(hero.y, half.y, bounds.0.min.y, bounds.0.max.y),
+        );
         let blend = 1.0 - (-CAMERA_FOLLOW_RATE * time.delta_secs()).exp();
-        transform.translation.x += (target_x - transform.translation.x) * blend;
-        transform.translation.y = bounds.0.center().y;
+        let current = transform.translation.truncate();
+        let next = current + (target - current) * blend;
+        transform.translation.x = next.x;
+        transform.translation.y = next.y;
     }
 }
 
-/// Camera x that centres on `hero_x` without showing beyond the room edges.
-/// If the view is wider than the room, the room is centred.
+/// Camera position along one axis that centres on `hero` without showing
+/// beyond the room's edges `min` and `max`. If the view is bigger than the
+/// room on that axis, the room is centred.
 #[must_use]
-pub fn camera_target_x(hero_x: f32, half_width: f32, min_x: f32, max_x: f32) -> f32 {
-    let (lo, hi) = (min_x + half_width, max_x - half_width);
+pub fn camera_target(hero: f32, half_view: f32, min: f32, max: f32) -> f32 {
+    let (lo, hi) = (min + half_view, max - half_view);
     if lo > hi {
-        f32::midpoint(min_x, max_x)
+        f32::midpoint(min, max)
     } else {
-        hero_x.clamp(lo, hi)
+        hero.clamp(lo, hi)
     }
 }
 
@@ -905,16 +978,19 @@ pub fn camera_target_x(hero_x: f32, half_width: f32, min_x: f32, max_x: f32) -> 
 mod tests {
     use super::*;
     use crate::SimulationPlugin;
-    use crate::hero::HERO_SPAWN;
+    use crate::level::test_room;
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
 
     #[test]
     fn camera_target_clamps_to_room() {
-        assert!((camera_target_x(500.0, 960.0, 0.0, 4800.0) - 960.0).abs() < f32::EPSILON);
-        assert!((camera_target_x(2000.0, 960.0, 0.0, 4800.0) - 2000.0).abs() < f32::EPSILON);
-        assert!((camera_target_x(4700.0, 960.0, 0.0, 4800.0) - 3840.0).abs() < f32::EPSILON);
-        assert!((camera_target_x(10.0, 960.0, 0.0, 1000.0) - 500.0).abs() < f32::EPSILON);
+        assert!((camera_target(500.0, 960.0, 0.0, 4800.0) - 960.0).abs() < f32::EPSILON);
+        assert!((camera_target(2000.0, 960.0, 0.0, 4800.0) - 2000.0).abs() < f32::EPSILON);
+        assert!((camera_target(4700.0, 960.0, 0.0, 4800.0) - 3840.0).abs() < f32::EPSILON);
+        assert!((camera_target(10.0, 960.0, 0.0, 1000.0) - 500.0).abs() < f32::EPSILON);
+        // Vertically, a one-screen room stays centred; a tall one follows.
+        assert!((camera_target(900.0, 540.0, 0.0, 1080.0) - 540.0).abs() < f32::EPSILON);
+        assert!((camera_target(1500.0, 540.0, 0.0, 3000.0) - 1500.0).abs() < f32::EPSILON);
     }
 
     fn presentation_app() -> App {
@@ -948,7 +1024,7 @@ mod tests {
             .query_filtered::<(&Position, &PreviousPosition, &Transform), With<Hero>>()
             .single(world)
             .unwrap();
-        assert_ne!(pos.0, HERO_SPAWN, "hero should have moved");
+        assert_ne!(pos.0, test_room().start, "hero should have moved");
         // Drawn position lies on the segment between the last two steps.
         let drawn = transform.translation.truncate();
         let segment = pos.0 - prev.0;
@@ -1264,6 +1340,6 @@ mod tests {
             .unwrap();
         let bounds = world.resource::<RoomBounds>().0;
         assert!(camera.translation.x >= bounds.min.x && camera.translation.x <= bounds.max.x);
-        assert!((camera.translation.y - bounds.center().y).abs() < f32::EPSILON);
+        assert!(camera.translation.y >= bounds.min.y && camera.translation.y <= bounds.max.y);
     }
 }

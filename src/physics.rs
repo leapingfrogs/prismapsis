@@ -86,7 +86,10 @@ impl Aabb {
         self.max - self.min
     }
 
-    fn overlaps(&self, other: &Self) -> bool {
+    /// Whether the boxes overlap by more than a hair; touching edges don't
+    /// count.
+    #[must_use]
+    pub fn overlaps(&self, other: &Self) -> bool {
         self.min.x + OVERLAP_EPSILON < other.max.x
             && other.min.x + OVERLAP_EPSILON < self.max.x
             && self.min.y + OVERLAP_EPSILON < other.max.y

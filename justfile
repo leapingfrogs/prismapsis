@@ -1,13 +1,15 @@
 # Common development tasks. Run inside the devenv shell (`devenv shell` or direnv).
 
-# main.rs and the dev-only UI glue can't run headless, so are excluded.
-coverage_args := "--workspace --all-features --locked --ignore-filename-regex 'src/(main|dev_tools)\\.rs' --fail-under-lines 80"
+# main.rs, the dev-only UI glue and the command-line tools in src/bin are
+# thin wrappers that tests can't drive, so are excluded.
+coverage_args := "--workspace --all-features --locked --ignore-filename-regex 'src/(main|dev_tools)\\.rs|src/bin/' --fail-under-lines 80"
 
 # List available recipes
 default:
     @just --list
 
-# Run the game with a dev build and the tuning panel
+# Run the game with a dev build and the tuning panel. Play a level file
+# with `just run --level assets/levels/tower.toml`; saving it reloads it.
 run *args:
     cargo run --features dev -- {{args}}
 
@@ -22,6 +24,14 @@ run *args:
 run-gamescope *args:
     cargo build --features dev
     env -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH gamescope ${MANGOAPP:+--mangoapp} ${GAMESCOPE_ARGS:-} -- env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" target/debug/prismapsis --fullscreen {{args}}
+
+# Check level files for problems (every level by default)
+level-check *files="assets/levels/*.toml":
+    cargo run --locked --bin levels -- check {{files}}
+
+# Print level maps in colour
+level-show +files:
+    cargo run --locked --bin levels -- show {{files}}
 
 # Regenerate the sound effects in assets/audio from tools/sfx
 sfx:

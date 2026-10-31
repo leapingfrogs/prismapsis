@@ -69,4 +69,8 @@ pub enum GameEvent {
     ExitReached {
         at: Vec2,
     },
+    /// The hero touched a new checkpoint, which is now where it respawns.
+    CheckpointReached {
+        at: Vec2,
+    },
 }

@@ -196,6 +196,79 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 - **Wide horizontal levels, scrolling both ways.** Negative spin travels
   left, so backtracking is natural.
 - Progress means restoring a level's spectrum to open its exit.
+- **One room per level** with a seamless scrolling camera. Most levels are
+  one screen tall (1080 units) and any width. Some are taller, so the camera
+  follows on both axes.
+- **Fixed sequence.** Reaching the exit loads the next level, and the last
+  leads back to the first. For now the order is a list in `src/level/mod.rs`
+  (test room, then tower); a campaign file comes with generated levels.
+  Playing one file with `--level` repeats it.
+- A level can override wave and light settings. Settings it leaves out go
+  back to their defaults, so one level's settings don't carry into the next.
+- **Checkpoints.** Touching a checkpoint tile moves the respawn point. A
+  room reset (losing every life, or finishing) starts again from the start.
+- Mote waves appear at heights measured from the bottom of the view, so
+  they reach the hero in tall levels too.
+
+### Level format
+
+Each level is a TOML file whose layout is drawn as an ASCII grid, so it
+reads well in a terminal or text editor and is easy to generate.
+
+- `tile` sets the size of one character in world units (40 by default, so
+  a 1080-unit level is 27 rows).
+- A legend entry can set a `height` thinner than a tile for slim platforms.
+  The platform keeps its top edge on the tile's top edge.
+- `map` is a multi-line literal string holding the grid. An optional
+  `background` grid of the same size holds non-colliding scenery.
+- `[legend]` maps a character to what it places: a tile kind with a hue and
+  optional traits, an entity, or a marker. A built-in default legend covers
+  common cases, so many levels need no legend at all:
+  - `#` is a grey wall, and `R G B Y C M W` are walls of that hue.
+  - `r g b y c m w` are phantom platforms of that hue.
+  - `@` is the start, `X` the exit, `K` a checkpoint, and `.` or a space
+    is empty.
+
+  A level's legend adds or overrides characters, so it can use any type and
+  hue combination without a fixed character for every pairing.
+- Runs of the same character merge into rectangles on load. Collision and
+  colour shading therefore work on a few large shapes, not on every tile.
+- Entities such as lenses, pickups and spawners sit at their tile's centre.
+- Ordinary TOML fields hold settings that aren't geometry: global enemy
+  waves and their colours, and per-level light tuning overrides. Spawner
+  tiles can add local enemies.
+- Level files live in `assets/levels`. The test room is built into the game.
+  `just run --level <file>` plays another file, and dev builds reload the
+  level being played whenever its file is saved.
+
+### Tile kinds
+
+- **Wall:** solid, shaded by its hue.
+- **Phantom:** becomes solid once its hue is restored.
+- **One-way platform:** the hero passes up through it and lands on top.
+- **Moving platform:** its path is drawn in the grid as a track character,
+  and the legend sets its speed. The hero rides with it:
+  - When bouncing, the platform's velocity is added to the bounce, so the
+    platform's movement skews it.
+  - With anti-gravity, a hero resting on the platform is carried along, on
+    top of their own horizontal movement.
+- **Crumbling:** gives way after being landed on a set number of times.
+- **Breakable:** only the matching split beam colour breaks it, so a red
+  block needs the red beam.
+- **Traits** set in the legend:
+  - bounce modifiers: a spring pad or mud, with a strength multiplier.
+  - mirror: every surface reflects the beam by its angle of incidence.
+
+### Level tooling
+
+- `just level-show <file>` prints a level with ANSI colours per hue.
+- `just level-check` reports every problem in the level files, and a test
+  runs the same checks in CI. It checks that every character is in the
+  legend, that the level has one start and an exit, and that legend entries
+  and settings make sense. Tracks will be checked once moving platforms
+  exist.
+- A procedural generator that writes level files from a seed. Generated
+  levels supply the first campaign.
 
 ## Damage
 
@@ -252,6 +325,9 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 
 ## Open questions
 
+- Procedural generator: which constraints guarantee a level is completable
+  (reachable phantoms, enough enemies of each colour)?
+
 - Gauge size and light per enemy: tune by playtesting (starting at 10, with
   1 per mote and 4 per lens).
 - Drop chance and how long a drop stays: tune by playtesting (currently
@@ -269,6 +345,8 @@ Beam energy gives power-ups a cost dimension as well as a benefit:
 | 4b | More power-ups | Mirror face, light nova, beam energy upgrades. |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
-| 6 | Levels | Two-way scrolling levels loaded from data, checkpoints, lives. |
+| 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |
+| 6b | Tile kinds | One-way, moving, crumbling and colour-breakable platforms; spring and mud bounce modifiers; mirror walls reflecting the beam. |
+| 6c | Campaign | Procedural level generator; a campaign file listing generated levels. |
 | 7 | Game loop | Menus, pause, game over, score, music, audio settings. |
 | 8+ | 3D | To be designed. |

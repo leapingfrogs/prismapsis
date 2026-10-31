@@ -4,15 +4,12 @@
 use bevy::prelude::*;
 
 use crate::events::GameEvent;
-use crate::level::Solid;
+use crate::level::{CurrentLevel, Solid};
 use crate::physics::{self, Body, BounceTuning};
 use crate::powerup::{Abilities, PowerUp};
 
 /// Collision half-size of the hero, in world units.
 pub const HERO_RADIUS: f32 = 24.0;
-
-/// Where the hero appears in the test room.
-pub const HERO_SPAWN: Vec2 = Vec2::new(400.0, 400.0);
 
 #[derive(Component, Debug, Default, Reflect)]
 #[reflect(Component)]
@@ -64,12 +61,14 @@ impl Facing {
 #[reflect(Component)]
 pub struct Invulnerable(pub f32);
 
-pub fn spawn_hero(mut commands: Commands) {
+/// The hero appears at the level's start.
+pub fn spawn_hero(mut commands: Commands, level: Res<CurrentLevel>) {
+    let start = level.0.start;
     commands.spawn((
         Name::new("Hero"),
         Hero,
-        Position(HERO_SPAWN),
-        PreviousPosition(HERO_SPAWN),
+        Position(start),
+        PreviousPosition(start),
         Velocity::default(),
         Spin::default(),
         Facing::default(),
@@ -212,6 +211,7 @@ mod tests {
     fn input_app() -> App {
         let mut app = App::new();
         app.init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(CurrentLevel(crate::level::test_room()))
             .add_systems(Startup, spawn_hero)
             .add_systems(Update, spin_input);
         app.update();
