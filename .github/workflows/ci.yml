@@ -41,7 +41,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   coverage:
     name: Test & coverage
@@ -57,7 +57,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Run tests with coverage
-        run: cargo llvm-cov --all-features --locked --no-report
+        run: cargo llvm-cov --workspace --all-features --locked --no-report
       - name: Check threshold and write lcov
         run: cargo llvm-cov report --ignore-filename-regex 'src/(main|dev_tools)\.rs' --fail-under-lines 80 --lcov --output-path lcov.info
       - name: Write HTML report

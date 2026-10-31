@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 
 use crate::enemy::{Enemy, HIT_FLASH};
+use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Position, update_facing};
 use crate::level::Solid;
 use crate::physics::{Aabb, ray_aabb, ray_circle};
@@ -405,6 +406,7 @@ fn update_energy(
 /// Defeating them (at zero health) is handled in `enemy`.
 pub fn damage_enemies(
     time: Res<Time>,
+    mut events: MessageWriter<GameEvent>,
     tuning: Res<BeamTuning>,
     abilities: Res<Abilities>,
     powerups: Res<PowerUpTuning>,
@@ -441,11 +443,12 @@ pub fn damage_enemies(
     let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle, &loadout);
 
     // Same query, same order as the scene built above.
-    let mut enemies: Vec<_> = enemies.iter_mut().map(|(_, e)| e).collect();
+    let mut enemies: Vec<_> = enemies.iter_mut().collect();
     for i in trace.hit_targets {
-        if let Some(enemy) = enemies.get_mut(i) {
+        if let Some((pos, enemy)) = enemies.get_mut(i) {
             enemy.health = enemy.health.saturating_sub(ticks);
             enemy.flash = HIT_FLASH;
+            events.write(GameEvent::EnemyHit { at: pos.0 });
         }
     }
 }

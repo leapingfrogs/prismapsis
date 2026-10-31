@@ -45,6 +45,13 @@ artifacts.
 Run `just ci` in the dev shell before opening a PR; it runs the same blocking
 checks as CI.
 
+## Sound effects
+
+Sound effects are synthesised by `tools/sfx` from recipes in
+`tools/sfx/src/lib.rs`. After changing a recipe, run `just sfx` to regenerate
+the files in `assets/audio` and commit them; the game embeds them at compile
+time. Use the dev panel's Sound section (F1 or backtick) to audition each one.
+
 ## Coverage reports
 
 Every CI run shows a coverage summary on its run page and uploads the full

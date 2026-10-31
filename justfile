@@ -1,7 +1,7 @@
 # Common development tasks. Run inside the devenv shell (`devenv shell` or direnv).
 
 # main.rs and the dev-only UI glue can't run headless, so are excluded.
-coverage_args := "--all-features --locked --ignore-filename-regex 'src/(main|dev_tools)\\.rs' --fail-under-lines 80"
+coverage_args := "--workspace --all-features --locked --ignore-filename-regex 'src/(main|dev_tools)\\.rs' --fail-under-lines 80"
 
 # List available recipes
 default:
@@ -23,6 +23,10 @@ run-gamescope *args:
     cargo build --features dev
     env -u WAYLAND_DISPLAY -u LD_LIBRARY_PATH gamescope ${MANGOAPP:+--mangoapp} ${GAMESCOPE_ARGS:-} -- env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" target/debug/prismapsis --fullscreen {{args}}
 
+# Regenerate the sound effects in assets/audio from tools/sfx
+sfx:
+    cargo run --locked -p sfx
+
 # Run the game with an optimised release build
 release *args:
     cargo run --release -- {{args}}
@@ -34,11 +38,11 @@ fmt:
 # Check formatting and run clippy
 lint:
     cargo fmt --all -- --check
-    cargo clippy --all-targets --all-features --locked -- -D warnings
+    cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 # Run the tests
 test *args:
-    cargo test --all-features --locked {{args}}
+    cargo test --workspace --all-features --locked {{args}}
 
 # Run tests with coverage, failing below the threshold
 coverage:

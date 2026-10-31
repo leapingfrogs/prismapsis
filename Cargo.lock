@@ -3263,6 +3263,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
+
+[[package]]
 name = "icu_collections"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4961,6 +4967,7 @@ checksum = "d0a536bb79db59098ef71a4dd4246c02eb87b316deceb1b68e0cde7167ec01eb"
 dependencies = [
  "cpal",
  "dasp_sample",
+ "hound",
  "lewton",
  "num-rational",
  "thiserror 2.0.21",
@@ -5145,6 +5152,10 @@ checksum = "4e7523beb55eece201a2356bee0bbca0d1ab466c14c07703b2e0ee6d42cb0c2c"
 dependencies = [
  "serde_core",
 ]
+
+[[package]]
+name = "sfx"
+version = "0.1.0"
 
 [[package]]
 name = "sharded-slab"

@@ -12,12 +12,14 @@ pub mod beam;
 #[cfg(feature = "dev")]
 pub mod dev_tools;
 pub mod enemy;
+pub mod events;
 pub mod hero;
 pub mod level;
 pub mod physics;
 pub mod powerup;
 pub mod prism;
 pub mod render;
+pub mod sound;
 
 /// Title shown on the game window.
 pub const WINDOW_TITLE: &str = "Prismapsis";
@@ -41,7 +43,11 @@ impl Plugin for GamePlugin {
         app.insert_resource(ClearColor(BACKGROUND))
             // Different drops each run; tests keep the fixed default seed.
             .insert_resource(powerup::DropRng::seeded(time_seed()))
-            .add_plugins((SimulationPlugin, render::PresentationPlugin));
+            .add_plugins((
+                SimulationPlugin,
+                render::PresentationPlugin,
+                sound::SoundPlugin,
+            ));
         #[cfg(feature = "dev")]
         app.add_plugins(dev_tools::DevToolsPlugin);
     }
@@ -54,6 +60,7 @@ pub struct SimulationPlugin;
 impl Plugin for SimulationPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Time::<Fixed>::from_hz(PHYSICS_HZ))
+            .add_message::<events::GameEvent>()
             .init_resource::<physics::BounceTuning>()
             .register_type::<physics::BounceTuning>()
             .add_systems(Startup, (level::spawn_test_room, hero::spawn_hero))

@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::events::GameEvent;
 use crate::hero::{HERO_RADIUS, Hero, Position};
 
 /// Collision radius of a pickup.
@@ -207,10 +208,16 @@ fn age_pickups(
     mut commands: Commands,
     time: Res<Time>,
     tuning: Res<PowerUpTuning>,
-    mut pickups: Query<(Entity, &mut Pickup)>,
+    mut events: MessageWriter<GameEvent>,
+    mut pickups: Query<(Entity, &mut Pickup, &Position)>,
 ) {
-    for (entity, mut pickup) in &mut pickups {
+    let warn_at = tuning.drop_lifetime - PICKUP_WARNING;
+    for (entity, mut pickup, pos) in &mut pickups {
+        let before = pickup.age;
         pickup.age += time.delta_secs();
+        if before < warn_at && pickup.age >= warn_at {
+            events.write(GameEvent::PickupExpiring { at: pos.0 });
+        }
         if pickup.age >= tuning.drop_lifetime {
             commands.entity(entity).despawn();
         }
@@ -221,6 +228,7 @@ fn age_pickups(
 fn collect_pickups(
     mut commands: Commands,
     mut abilities: ResMut<Abilities>,
+    mut events: MessageWriter<GameEvent>,
     heroes: Query<&Position, With<Hero>>,
     pickups: Query<(Entity, &Pickup, &Position), Without<Hero>>,
 ) {
@@ -230,6 +238,10 @@ fn collect_pickups(
     for (entity, pickup, pos) in &pickups {
         if hero.0.distance_squared(pos.0) < (HERO_RADIUS + PICKUP_RADIUS).powi(2) {
             abilities.grant(pickup.power);
+            events.write(GameEvent::PickupCollected {
+                power: pickup.power,
+                at: pos.0,
+            });
             commands.entity(entity).despawn();
         }
     }

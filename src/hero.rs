@@ -3,6 +3,7 @@
 
 use bevy::prelude::*;
 
+use crate::events::GameEvent;
 use crate::level::Solid;
 use crate::physics::{self, Body, BounceTuning};
 use crate::powerup::{Abilities, PowerUp};
@@ -134,6 +135,7 @@ pub fn move_hero(
     tuning: Res<BounceTuning>,
     abilities: Res<Abilities>,
     hover: Res<HoverInput>,
+    mut events: MessageWriter<GameEvent>,
     solids: Query<&Solid>,
     mut heroes: Query<
         (
@@ -154,12 +156,26 @@ pub fn move_hero(
             half: HERO_RADIUS,
         };
         let dt = time.delta_secs();
-        if abilities.has(PowerUp::AntiGravity) {
-            physics::hover_step(&mut body, &mut spin.0, hover.0, &tuning, &solids, dt);
+        // Hovering rests on floors rather than bouncing, so only real bounces
+        // count.
+        let contacts = if abilities.has(PowerUp::AntiGravity) {
+            let mut contacts =
+                physics::hover_step(&mut body, &mut spin.0, hover.0, &tuning, &solids, dt);
+            contacts.floor = false;
+            contacts
         } else {
-            physics::step(&mut body, &mut spin.0, &tuning, &solids, dt);
-        }
+            physics::step(&mut body, &mut spin.0, &tuning, &solids, dt)
+        };
         pos.0 = body.pos;
+        if contacts.floor {
+            events.write(GameEvent::Bounced {
+                at: body.pos,
+                spin: spin.0,
+            });
+        }
+        if contacts.wall {
+            events.write(GameEvent::WallBump { at: body.pos });
+        }
         vel.0 = body.vel;
     }
 }
