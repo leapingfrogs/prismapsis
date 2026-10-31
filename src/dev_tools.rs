@@ -7,8 +7,8 @@ use bevy::window::{PresentMode, PrimaryWindow};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::beam::BeamTuning;
+use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
 use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
-use crate::level::Target;
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::prism::{PrismFrozen, PrismTuning};
 
@@ -76,7 +76,10 @@ fn tuning_panel(
     mut prism_tuning: ResMut<PrismTuning>,
     prism_frozen: Res<PrismFrozen>,
     mut beam_tuning: ResMut<BeamTuning>,
-    targets: Query<(&Name, &Target)>,
+    mut enemy_tuning: ResMut<EnemyTuning>,
+    kills: Res<Kills>,
+    lives: Res<Lives>,
+    mut reset_room: ResMut<ResetRoom>,
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
     diagnostics: Res<DiagnosticsStore>,
     mut fixed_time: ResMut<Time<Fixed>>,
@@ -91,12 +94,20 @@ fn tuning_panel(
         ui.separator();
         prism_section(ui, &mut prism_tuning, prism_frozen.0);
         ui.separator();
-        beam_section(ui, &mut beam_tuning, &targets);
-        if ui.button("Reset tuning").clicked() {
-            *tuning = BounceTuning::default();
-            *prism_tuning = PrismTuning::default();
-            *beam_tuning = BeamTuning::default();
-        }
+        beam_section(ui, &mut beam_tuning);
+        ui.separator();
+        enemy_section(ui, &mut enemy_tuning, *kills, *lives);
+        ui.horizontal(|ui| {
+            if ui.button("Reset tuning").clicked() {
+                *tuning = BounceTuning::default();
+                *prism_tuning = PrismTuning::default();
+                *beam_tuning = BeamTuning::default();
+                *enemy_tuning = EnemyTuning::default();
+            }
+            if ui.button("Reset room").clicked() {
+                reset_room.0 = true;
+            }
+        });
         ui.separator();
         for (pos, vel, spin) in &heroes {
             ui.label(format!("spin step: {:+} / ±{MAX_SPIN}", spin.0));
@@ -132,7 +143,7 @@ fn prism_section(ui: &mut egui::Ui, tuning: &mut PrismTuning, frozen: bool) {
     });
 }
 
-fn beam_section(ui: &mut egui::Ui, tuning: &mut BeamTuning, targets: &Query<(&Name, &Target)>) {
+fn beam_section(ui: &mut egui::Ui, tuning: &mut BeamTuning) {
     ui.add(egui::Slider::new(&mut tuning.max_energy, 20.0..=300.0).text("max energy"));
     ui.add(egui::Slider::new(&mut tuning.drain_rate, 5.0..=150.0).text("drain / s"));
     ui.add(egui::Slider::new(&mut tuning.recharge_rate, 5.0..=150.0).text("recharge / s"));
@@ -140,12 +151,22 @@ fn beam_section(ui: &mut egui::Ui, tuning: &mut BeamTuning, targets: &Query<(&Na
     ui.add(egui::Slider::new(&mut tuning.min_energy_to_fire, 0.0..=50.0).text("min to fire"));
     ui.add(egui::Slider::new(&mut tuning.damage_rate, 1.0..=30.0).text("damage ticks / s"));
     ui.add(egui::Slider::new(&mut tuning.split_angle, 0.0..=60.0).text("split angle (°)"));
-    let mut hits: Vec<_> = targets
-        .iter()
-        .map(|(name, target)| format!("{}: {}", name.as_str(), target.hits))
-        .collect();
-    hits.sort();
-    ui.label(format!("hits: {}", hits.join(", ")));
+}
+
+fn enemy_section(ui: &mut egui::Ui, tuning: &mut EnemyTuning, kills: Kills, lives: Lives) {
+    ui.add(egui::Slider::new(&mut tuning.mote_health, 1..=20).text("mote health (ticks)"));
+    ui.add(egui::Slider::new(&mut tuning.lens_health, 1..=60).text("lens health (ticks)"));
+    ui.add(egui::Slider::new(&mut tuning.mote_speed, 50.0..=600.0).text("mote speed"));
+    ui.add(egui::Slider::new(&mut tuning.wave_size, 1..=12).text("motes per wave"));
+    ui.add(egui::Slider::new(&mut tuning.wave_interval, 1.0..=20.0).text("wave interval (s)"));
+    ui.add(
+        egui::Slider::new(&mut tuning.lens_fire_interval, 0.5..=6.0).text("lens fire interval (s)"),
+    );
+    ui.add(egui::Slider::new(&mut tuning.orb_speed, 50.0..=600.0).text("orb speed"));
+    ui.label(format!(
+        "lives: {}   kills: {} motes, {} lenses",
+        lives.0, kills.motes, kills.lenses
+    ));
 }
 
 fn performance_section(
