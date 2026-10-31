@@ -593,6 +593,92 @@ pub fn sounds() -> Vec<Sound> {
         )
         .echo(0.1, 0.3)
         .peak(0.45),
+        // --- Light and colour ---
+        // Pitched to the light's colour at runtime: root, third or fifth.
+        Sound::new(
+            "light_absorb",
+            vec![
+                Tone::new(Sine, c5, 0.25).decay(0.07),
+                Tone::new(Sine, c6, 0.2).decay(0.05).volume(0.35),
+            ],
+        )
+        .echo(0.07, 0.3)
+        .peak(0.4),
+        // A rising flourish, pitched to the restored primary at runtime.
+        Sound::new(
+            "colour_restored",
+            vec![
+                Tone::new(Sine, c5, 0.3).decay(0.15),
+                Tone::new(Sine, e5, 0.3).at(0.06).decay(0.15),
+                Tone::new(Sine, g5, 0.3).at(0.12).decay(0.15),
+                Tone::new(Sine, c6, 0.6).at(0.18).decay(0.3),
+                Tone::new(Sine, fs6, 0.5).at(0.24).decay(0.2).volume(0.3),
+                Tone::new(Triangle, c5 / 2.0, 0.6)
+                    .attack(0.05)
+                    .decay(0.3)
+                    .volume(0.4),
+            ],
+        )
+        .echo(0.11, 0.35)
+        .peak(0.6),
+        // White: the full triad swells in with a shimmer as the exit opens.
+        Sound::new(
+            "spectrum_complete",
+            vec![
+                Tone::new(Sine, c5, 1.6)
+                    .attack(0.15)
+                    .decay(0.8)
+                    .vibrato(0.003, 5.0),
+                Tone::new(Sine, e5, 1.6)
+                    .attack(0.2)
+                    .decay(0.8)
+                    .vibrato(0.003, 5.5),
+                Tone::new(Sine, g5, 1.6)
+                    .attack(0.25)
+                    .decay(0.8)
+                    .vibrato(0.003, 6.0),
+                Tone::new(Sine, c6, 1.4)
+                    .at(0.2)
+                    .attack(0.2)
+                    .decay(0.7)
+                    .volume(0.6),
+                Tone::new(Sine, fs6, 0.3).at(0.4).decay(0.1).volume(0.3),
+                Tone::new(Sine, g6, 0.3).at(0.55).decay(0.1).volume(0.3),
+                Tone::new(Triangle, c5 / 4.0, 1.6)
+                    .attack(0.3)
+                    .decay(0.8)
+                    .volume(0.5),
+            ],
+        )
+        .echo(0.15, 0.3)
+        .peak(0.7),
+        Sound::new(
+            "level_complete",
+            vec![
+                Tone::new(Square(0.5), c5, 0.12).decay(0.1).volume(0.6),
+                Tone::new(Square(0.5), e5, 0.12)
+                    .at(0.1)
+                    .decay(0.1)
+                    .volume(0.6),
+                Tone::new(Square(0.5), g5, 0.12)
+                    .at(0.2)
+                    .decay(0.1)
+                    .volume(0.6),
+                Tone::new(Square(0.5), c6, 0.9)
+                    .at(0.3)
+                    .decay(0.5)
+                    .volume(0.6),
+                Tone::new(Sine, e6, 0.9).at(0.3).decay(0.5).volume(0.4),
+                Tone::new(Sine, g6, 0.9).at(0.3).decay(0.5).volume(0.35),
+                Tone::new(Triangle, c5 / 2.0, 0.9)
+                    .at(0.3)
+                    .decay(0.5)
+                    .volume(0.5),
+            ],
+        )
+        .lowpass(5000.0)
+        .echo(0.12, 0.3)
+        .peak(0.7),
         // --- Prism and energy ---
         Sound::new(
             "prism_freeze",

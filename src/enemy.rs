@@ -15,7 +15,8 @@ use crate::events::GameEvent;
 use crate::hero::{
     Facing, HERO_RADIUS, HERO_SPAWN, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
 };
-use crate::level::{RoomBounds, Solid, test_lenses};
+use crate::level::{RoomBounds, Solid, spawn_hidden_pickups, test_lenses};
+use crate::light::{Colour, LightTuning, Primary, Spectrum};
 use crate::physics::{Aabb, ray_aabb};
 use crate::powerup::{Abilities, DropRng, Pickup, PowerUpTuning, pickup_bundle, roll_drop};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
@@ -293,9 +294,10 @@ impl Plugin for EnemyPlugin {
     }
 }
 
-fn lens_bundle(center: Vec2, tuning: &EnemyTuning) -> impl Bundle {
+fn lens_bundle(center: Vec2, colour: Primary, tuning: &EnemyTuning) -> impl Bundle {
     (
         Name::new("Lens"),
+        Colour(colour),
         Enemy {
             kind: EnemyKind::Lens,
             health: tuning.lens_health,
@@ -309,8 +311,8 @@ fn lens_bundle(center: Vec2, tuning: &EnemyTuning) -> impl Bundle {
 }
 
 fn spawn_placed_enemies(mut commands: Commands, tuning: Res<EnemyTuning>) {
-    for center in test_lenses() {
-        commands.spawn(lens_bundle(center, &tuning));
+    for (center, colour) in test_lenses() {
+        commands.spawn(lens_bundle(center, colour, &tuning));
     }
 }
 
@@ -334,9 +336,12 @@ fn spawn_waves(
     };
     let index = waves.count;
     waves.count += 1;
+    // Each wave is one colour, cycling red, green, blue.
+    let colour = Primary::ALL[index as usize % Primary::ALL.len()];
     for spawn in wave_spawns(hero.0.x, index, tuning.wave_size) {
         commands.spawn((
             Name::new("Mote"),
+            Colour(colour),
             Enemy {
                 kind: EnemyKind::Mote,
                 health: tuning.mote_health,
@@ -463,9 +468,11 @@ fn defeat_enemies(
     mut rng: ResMut<DropRng>,
     abilities: Res<Abilities>,
     powerup_tuning: Res<PowerUpTuning>,
-    enemies: Query<(Entity, &Enemy, &Position)>,
+    light: Res<LightTuning>,
+    mut spectrum: ResMut<Spectrum>,
+    enemies: Query<(Entity, &Enemy, &Position, Option<&Colour>)>,
 ) {
-    for (entity, enemy, pos) in &enemies {
+    for (entity, enemy, pos, colour) in &enemies {
         if enemy.health > 0 {
             continue;
         }
@@ -474,6 +481,16 @@ fn defeat_enemies(
             kind: enemy.kind,
             at: pos.0,
         });
+        if let Some(&Colour(colour)) = colour {
+            let amount = match enemy.kind {
+                EnemyKind::Mote => light.mote_light,
+                EnemyKind::Lens => light.lens_light,
+            };
+            events.write(GameEvent::LightAbsorbed { colour, at: pos.0 });
+            for hue in spectrum.absorb(colour, amount, light.gauge_capacity) {
+                events.write(GameEvent::ColourRestored { hue });
+            }
+        }
         if let Some(power) = roll_drop(&mut rng, *abilities, powerup_tuning.drop_chance) {
             commands.spawn(pickup_bundle(power, pos.0));
             events.write(GameEvent::PickupDropped { power, at: pos.0 });
@@ -501,6 +518,7 @@ fn hero_hits(
     tuning: Res<EnemyTuning>,
     mut lives: ResMut<Lives>,
     mut abilities: ResMut<Abilities>,
+    mut spectrum: ResMut<Spectrum>,
     mut reset: ResMut<ResetRoom>,
     enemies: Query<(&Position, &Enemy), Without<Hero>>,
     orbs: Query<(Entity, &Position), (With<Orb>, Without<Hero>)>,
@@ -546,6 +564,7 @@ fn hero_hits(
     }
     lives.0 = lives.0.saturating_sub(1);
     *abilities = Abilities::default();
+    spectrum.halve_partial();
     if lives.0 == 0 {
         reset.0 = true;
     }
@@ -557,8 +576,8 @@ fn hero_hits(
     invulnerable.0 = tuning.respawn_invulnerability;
 }
 
-/// Clear and repopulate the room, refilling lives and energy and removing
-/// pickups and abilities.
+/// Clear and repopulate the room, refilling lives and energy, removing
+/// pickups and abilities, and greying the spectrum again.
 pub fn reset_room(
     mut commands: Commands,
     mut events: MessageWriter<GameEvent>,
@@ -569,6 +588,7 @@ pub fn reset_room(
     mut energy: ResMut<BeamEnergy>,
     mut waves: ResMut<WaveTimer>,
     mut abilities: ResMut<Abilities>,
+    mut spectrum: ResMut<Spectrum>,
     clear: Query<Entity, Or<(With<Enemy>, With<Orb>, With<Burst>, With<Pickup>)>>,
 ) {
     if !reset.0 {
@@ -579,14 +599,16 @@ pub fn reset_room(
     for entity in &clear {
         commands.entity(entity).despawn();
     }
-    for center in test_lenses() {
-        commands.spawn(lens_bundle(center, &tuning));
+    for (center, colour) in test_lenses() {
+        commands.spawn(lens_bundle(center, colour, &tuning));
     }
     *lives = Lives::default();
     *kills = Kills::default();
     *energy = BeamEnergy::default();
     *waves = WaveTimer::default();
     *abilities = Abilities::default();
+    *spectrum = Spectrum::default();
+    spawn_hidden_pickups(&mut commands);
 }
 
 fn age_bursts(mut commands: Commands, time: Res<Time>, mut bursts: Query<(Entity, &mut Burst)>) {

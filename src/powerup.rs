@@ -9,6 +9,7 @@ use bevy::prelude::*;
 
 use crate::events::GameEvent;
 use crate::hero::{HERO_RADIUS, Hero, Position};
+use crate::light::Hidden;
 
 /// Collision radius of a pickup.
 pub const PICKUP_RADIUS: f32 = 26.0;
@@ -103,6 +104,11 @@ pub struct Pickup {
     /// Seconds since it appeared.
     pub age: f32,
 }
+
+/// A pickup placed by the level rather than dropped: it never expires.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
+pub struct Placed;
 
 /// Small, fast random number generator for drops (xorshift64*). Seeded with
 /// a constant so tests are repeatable; the game reseeds it at start-up.
@@ -209,7 +215,7 @@ fn age_pickups(
     time: Res<Time>,
     tuning: Res<PowerUpTuning>,
     mut events: MessageWriter<GameEvent>,
-    mut pickups: Query<(Entity, &mut Pickup, &Position)>,
+    mut pickups: Query<(Entity, &mut Pickup, &Position), Without<Placed>>,
 ) {
     let warn_at = tuning.drop_lifetime - PICKUP_WARNING;
     for (entity, mut pickup, pos) in &mut pickups {
@@ -230,7 +236,7 @@ fn collect_pickups(
     mut abilities: ResMut<Abilities>,
     mut events: MessageWriter<GameEvent>,
     heroes: Query<&Position, With<Hero>>,
-    pickups: Query<(Entity, &Pickup, &Position), Without<Hero>>,
+    pickups: Query<(Entity, &Pickup, &Position), (Without<Hero>, Without<Hidden>)>,
 ) {
     let Ok(hero) = heroes.single() else {
         return;
@@ -330,9 +336,13 @@ mod tests {
         app
     }
 
-    fn count<T: Component>(app: &mut App) -> usize {
+    /// Pickups dropped by enemies, leaving out the level's placed ones.
+    fn dropped(app: &mut App) -> usize {
         let world = app.world_mut();
-        world.query_filtered::<(), With<T>>().iter(world).count()
+        world
+            .query_filtered::<(), (With<Pickup>, Without<Placed>)>()
+            .iter(world)
+            .count()
     }
 
     fn hero_position(app: &mut App) -> Vec2 {
@@ -359,7 +369,10 @@ mod tests {
         ));
         app.update();
         let world = app.world_mut();
-        let (pickup, pos) = world.query::<(&Pickup, &Position)>().single(world).unwrap();
+        let (pickup, pos) = world
+            .query_filtered::<(&Pickup, &Position), Without<Placed>>()
+            .single(world)
+            .unwrap();
         let (pickup, pos) = (*pickup, pos.0);
         assert_eq!(pos, at);
         // Fresh hero: the drop is something it doesn't have.
@@ -379,7 +392,7 @@ mod tests {
             Position(Vec2::new(3000.0, 900.0)),
         ));
         app.update();
-        assert_eq!(count::<Pickup>(&mut app), 0);
+        assert_eq!(dropped(&mut app), 0);
     }
 
     #[test]
@@ -390,7 +403,7 @@ mod tests {
             .spawn(pickup_bundle(PowerUp::RearShot, hero));
         app.update();
         assert!(app.world().resource::<Abilities>().has(PowerUp::RearShot));
-        assert_eq!(count::<Pickup>(&mut app), 0);
+        assert_eq!(dropped(&mut app), 0);
     }
 
     #[test]
@@ -399,7 +412,7 @@ mod tests {
         app.world_mut()
             .spawn(pickup_bundle(PowerUp::Spread, Vec2::new(4000.0, 900.0)));
         app.update();
-        assert_eq!(count::<Pickup>(&mut app), 1);
+        assert_eq!(dropped(&mut app), 1);
         let frames = (PowerUpTuning::default().drop_lifetime / 0.016).ceil();
         // Small positive whole number.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -407,7 +420,7 @@ mod tests {
         for _ in 0..frames + 5 {
             app.update();
         }
-        assert_eq!(count::<Pickup>(&mut app), 0);
+        assert_eq!(dropped(&mut app), 0);
     }
 
     #[test]
@@ -440,7 +453,7 @@ mod tests {
             .spawn(pickup_bundle(PowerUp::Spread, Vec2::new(4000.0, 900.0)));
         app.insert_resource(ResetRoom(true));
         app.update();
-        assert_eq!(count::<Pickup>(&mut app), 0);
+        assert_eq!(dropped(&mut app), 0);
         assert_eq!(*app.world().resource::<Abilities>(), Abilities::default());
     }
 }

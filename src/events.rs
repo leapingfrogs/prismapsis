@@ -4,6 +4,7 @@
 use bevy::prelude::*;
 
 use crate::enemy::EnemyKind;
+use crate::light::{Hue, Primary};
 use crate::powerup::PowerUp;
 
 /// Something that just happened in the game. Positions are in world units.
@@ -53,6 +54,19 @@ pub enum GameEvent {
     },
     /// A pickup started blinking before it vanishes.
     PickupExpiring {
+        at: Vec2,
+    },
+    /// A defeated enemy released light into its colour's gauge.
+    LightAbsorbed {
+        colour: Primary,
+        at: Vec2,
+    },
+    /// A colour came back to the level (white opens the exit).
+    ColourRestored {
+        hue: Hue,
+    },
+    /// The hero went through the open exit.
+    ExitReached {
         at: Vec2,
     },
 }

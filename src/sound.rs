@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use crate::beam::{BeamEnergy, BeamTuning};
 use crate::enemy::EnemyKind;
 use crate::events::GameEvent;
+use crate::light::{Hue, Primary};
 use crate::powerup::{Abilities, PowerUp};
 use crate::prism::PrismFrozen;
 use crate::render::{BeamView, MainCamera};
@@ -39,6 +40,10 @@ pub enum SoundId {
     PickupCollect,
     PickupExpiring,
     AbilitiesLost,
+    LightAbsorb,
+    ColourRestored,
+    SpectrumComplete,
+    LevelComplete,
     PrismFreeze,
     PrismUnfreeze,
     EnergyEmpty,
@@ -89,6 +94,10 @@ sound_files! {
     PickupCollect => "pickup_collect",
     PickupExpiring => "pickup_expiring",
     AbilitiesLost => "abilities_lost",
+    LightAbsorb => "light_absorb",
+    ColourRestored => "colour_restored",
+    SpectrumComplete => "spectrum_complete",
+    LevelComplete => "level_complete",
     PrismFreeze => "prism_freeze",
     PrismUnfreeze => "prism_unfreeze",
     EnergyEmpty => "energy_empty",
@@ -120,6 +129,17 @@ pub const fn power_up_degree(power: PowerUp) -> i32 {
         PowerUp::Piercing => 2,
         PowerUp::AntiGravity => 3,
         PowerUp::RapidFire => 4,
+    }
+}
+
+/// The scale degree for each primary: red, green and blue are the root,
+/// third and fifth, so all three together make a major triad.
+#[must_use]
+pub const fn primary_degree(primary: Primary) -> i32 {
+    match primary {
+        Primary::Red => 0,
+        Primary::Green => 2,
+        Primary::Blue => 4,
     }
 }
 
@@ -267,6 +287,28 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
                 .speed(lydian_speed(power_up_degree(power))),
         ],
         GameEvent::PickupExpiring { at } => vec![Cue::new(SoundId::PickupExpiring).at(at)],
+        GameEvent::LightAbsorbed { colour, at } => vec![
+            Cue::new(SoundId::LightAbsorb)
+                .at(at)
+                .speed(lydian_speed(primary_degree(colour)))
+                .volume(0.7),
+        ],
+        GameEvent::ColourRestored { hue: Hue::White } => {
+            vec![Cue::new(SoundId::SpectrumComplete).delay(0.5)]
+        }
+        // A primary plays its flourish; a secondary plays both of its
+        // primaries' flourishes together, just after.
+        GameEvent::ColourRestored { hue } => hue
+            .primaries()
+            .iter()
+            .map(|&p| {
+                Cue::new(SoundId::ColourRestored)
+                    .speed(lydian_speed(primary_degree(p)))
+                    .volume(if hue.primaries().len() > 1 { 0.6 } else { 1.0 })
+                    .delay(if hue.primaries().len() > 1 { 0.25 } else { 0.0 })
+            })
+            .collect(),
+        GameEvent::ExitReached { at } => vec![Cue::new(SoundId::LevelComplete).at(at)],
     }
 }
 
@@ -643,6 +685,14 @@ mod tests {
                 at,
             },
             GameEvent::PickupExpiring { at },
+            GameEvent::LightAbsorbed {
+                colour: Primary::Green,
+                at,
+            },
+            GameEvent::ColourRestored { hue: Hue::Blue },
+            GameEvent::ColourRestored { hue: Hue::Cyan },
+            GameEvent::ColourRestored { hue: Hue::White },
+            GameEvent::ExitReached { at },
         ];
         for event in events {
             assert!(!cues_for(event, &mut combo).is_empty(), "{event:?}");
@@ -652,6 +702,26 @@ mod tests {
         let fast = cues_for(GameEvent::Bounced { at, spin: 5 }, &mut combo)[0].speed;
         let slow = cues_for(GameEvent::Bounced { at, spin: 0 }, &mut combo)[0].speed;
         assert!(fast > slow);
+    }
+
+    #[test]
+    fn colours_play_a_major_triad_and_secondaries_play_both_notes() {
+        let degrees: Vec<i32> = Primary::ALL.into_iter().map(primary_degree).collect();
+        // Root, major third and fifth: 0, 4 and 7 semitones.
+        let semitones: Vec<i32> = degrees
+            .iter()
+            .map(|&d| LYDIAN[usize::try_from(d).unwrap()])
+            .collect();
+        assert_eq!(semitones, vec![0, 4, 7]);
+
+        let mut combo = KillCombo::default();
+        let red = cues_for(GameEvent::ColourRestored { hue: Hue::Red }, &mut combo);
+        assert_eq!(red.len(), 1);
+        let yellow = cues_for(GameEvent::ColourRestored { hue: Hue::Yellow }, &mut combo);
+        assert_eq!(yellow.len(), 2);
+        assert!((yellow[0].speed - yellow[1].speed).abs() > 0.1);
+        let white = cues_for(GameEvent::ColourRestored { hue: Hue::White }, &mut combo);
+        assert_eq!(white[0].id, SoundId::SpectrumComplete);
     }
 
     #[test]
