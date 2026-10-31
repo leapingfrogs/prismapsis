@@ -208,11 +208,74 @@ fn resolve_y(
     }
 }
 
+/// Distance along a ray to where it enters `aabb`, or `None` if it misses.
+/// `dir` must be normalised. A ray starting inside the box hits at 0.
+#[must_use]
+pub fn ray_aabb(origin: Vec2, dir: Vec2, aabb: &Aabb) -> Option<f32> {
+    // Slab method: zero direction components give infinities, which the
+    // min/max below handle correctly.
+    let inv = dir.recip();
+    let t1 = (aabb.min - origin) * inv;
+    let t2 = (aabb.max - origin) * inv;
+    let t_enter = t1.min(t2).max_element();
+    let t_exit = t1.max(t2).min_element();
+    if t_exit < 0.0 || t_enter > t_exit {
+        return None;
+    }
+    Some(t_enter.max(0.0))
+}
+
+/// Distance along a ray to where it enters a circle, or `None` if it misses.
+/// `dir` must be normalised. A ray starting inside the circle hits at 0.
+#[must_use]
+pub fn ray_circle(origin: Vec2, dir: Vec2, center: Vec2, radius: f32) -> Option<f32> {
+    let offset = origin - center;
+    let b = offset.dot(dir);
+    let c = offset.length_squared() - radius * radius;
+    if c > 0.0 && b > 0.0 {
+        return None;
+    }
+    let discriminant = b * b - c;
+    if discriminant < 0.0 {
+        return None;
+    }
+    Some((-b - discriminant.sqrt()).max(0.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     const DT: f32 = 1.0 / 64.0;
+
+    #[test]
+    fn ray_hits_box_ahead_and_misses_behind_or_beside() {
+        let aabb = Aabb::new(Vec2::new(100.0, -10.0), Vec2::new(120.0, 10.0));
+        let t = ray_aabb(Vec2::ZERO, Vec2::X, &aabb).unwrap();
+        assert!((t - 100.0).abs() < 1e-4);
+        assert!(ray_aabb(Vec2::ZERO, Vec2::NEG_X, &aabb).is_none());
+        assert!(ray_aabb(Vec2::new(0.0, 50.0), Vec2::X, &aabb).is_none());
+        assert_eq!(ray_aabb(Vec2::new(110.0, 0.0), Vec2::X, &aabb), Some(0.0));
+    }
+
+    #[test]
+    fn ray_hits_box_diagonally() {
+        let aabb = Aabb::new(Vec2::new(10.0, 10.0), Vec2::new(20.0, 20.0));
+        let t = ray_aabb(Vec2::ZERO, Vec2::ONE.normalize(), &aabb).unwrap();
+        assert!((t - 10.0 * 2f32.sqrt()).abs() < 1e-4);
+    }
+
+    #[test]
+    fn ray_hits_circle_ahead_and_misses_otherwise() {
+        let t = ray_circle(Vec2::ZERO, Vec2::X, Vec2::new(100.0, 0.0), 10.0).unwrap();
+        assert!((t - 90.0).abs() < 1e-4);
+        assert!(ray_circle(Vec2::ZERO, Vec2::NEG_X, Vec2::new(100.0, 0.0), 10.0).is_none());
+        assert!(ray_circle(Vec2::ZERO, Vec2::X, Vec2::new(100.0, 50.0), 10.0).is_none());
+        assert_eq!(
+            ray_circle(Vec2::new(100.0, 0.0), Vec2::X, Vec2::new(100.0, 0.0), 10.0),
+            Some(0.0)
+        );
+    }
     const HALF: f32 = 24.0;
 
     fn floor() -> Aabb {
