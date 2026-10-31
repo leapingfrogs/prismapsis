@@ -1,0 +1,73 @@
+# The test room: every movement rule, enemy and colour gate in one place.
+# Walls reverse the hero, the yellow overhang caps the bounce, the cyan step
+# and magenta shelf test landing on raised floors, and the white floating
+# platform needs a higher apex. Phantom platforms (lowercase) turn solid as
+# their colour returns; the yellow and magenta ones need two colours.
+# See docs/design.md for the format.
+name = "Test room"
+
+map = '''
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                     p                                                       f                                      RR
+RR                                                                                                                    RR
+RR                 yyyyyyyy                                                 mmmmmm                                    RR
+RR                                                                                                    WWWWWWWWWW      RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR                                                                                                                    RR
+RR        @                                                                                    2                      RR
+RR                                                                                                                 XXXRR
+RR             rrrrrrrrrr                         ccccccc                  ggggggg   MMMMMMMMMMMM       bbbbbbb    XXXRR
+RR                               YYYYYYYYYYYYYY                     1                MMMMMMMMMMMM                  XXXRR
+RR                                                                                   MMMMMMMMMMMM                  XXXRR
+RR                                                          CCCCCCCCCC               MMMMMMMMMMMM                  XXXRR
+RR                                              K           CCCCCCCCCC               MMMMMMMMMMMM  K               XXXRR
+RR                                              K           CCCCCCCCCC               MMMMMMMMMMMM  K               XXXRR
+RR                                              K           CCCCCCCCCC               MMMMMMMMMMMM  K               XXXRR
+GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+'''
+
+background = '''
+
+
+
+                                                                                        RRRRRRR           YYYYY
+            CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCMMMMMMMMMMMMMMMMMMRRRRRRRMMMMMMMMMMMYYYYYMMMMMMM
+                                    MMMMMMMM                             CCC            RRRRRRR           YYYYY
+                                    MMMMMMMM                             CCC            RRRRRRR           YYYYY
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR           YYYYY
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB     MMMMMMMM                             CCC            RRRRRRR
+                          BBBBB                                          CCC            RRRRRRR
+                          BBBBB                                          CCC
+                          BBBBB                                          CCC
+                          BBBBB                                          CCC
+                          BBBBB                                          CCC
+                          BBBBB                                          CCC
+   GGGGGGGGGGGGGGGGGGG    BBBBB                                          CCC                       GGGGGGGGGGGGGGGG
+   GGGGGGGGGGGGGGGGGGG    BBBBB                                          CCC                       GGGGGGGGGGGGGGGG
+   GGGGGGGGGGGGGGGGGGG    BBBBB                  YYYYYYYYYYYYYYYY        CCC                       GGGGGGGGGGGGGGGG
+   GGGGGGGGGGGGGGGGGGG    BBBBB                  YYYYYYYYYYYYYYYY        CCC                       GGGGGGGGGGGGGGGG
+   GGGGGGGGGGGGGGGGGGG    BBBBB                  YYYYYYYYYYYYYYYY        CCC                       GGGGGGGGGGGGGGGG
+
+
+'''
+
+[legend]
+"p" = { pickup = "piercing", hidden = "yellow" }
+"f" = { pickup = "rapid-fire", hidden = "magenta" }
+"1" = { lens = "red" }
+"2" = { lens = "blue" }

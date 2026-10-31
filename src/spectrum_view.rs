@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use crate::level::{Scenery, Solid};
+use crate::level::{CurrentLevel, Scenery, Solid};
 use crate::light::{
     ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Shade, Spectrum,
 };
@@ -111,13 +111,15 @@ fn draw_scenery(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
-    scenery: Query<(Entity, &Scenery, &Shade), Added<Scenery>>,
+    scenery: Query<(Entity, &Scenery, Option<&Shade>), Added<Scenery>>,
 ) {
     for (entity, scenery, shade) in &scenery {
         let size = scenery.0.size();
+        // Scenery without a hue stays grey.
+        let colour = shade.map_or(SCENERY_GREY, |s| shaded_colour(s.0, 0.0, true));
         commands.entity(entity).insert((
             Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(materials.add(shaded_colour(shade.0, 0.0, true))),
+            MeshMaterial2d(materials.add(colour)),
             Transform::from_translation(scenery.0.center().extend(-1.0)),
         ));
     }
@@ -358,6 +360,7 @@ fn spawn_banner(mut commands: Commands) {
         Name::new("Level complete banner"),
         Banner::default(),
         Text::new("Spectrum restored!"),
+        TextLayout::justify(Justify::Center),
         TextFont {
             font_size: FontSize::Vh(6.0),
             ..default()
@@ -373,14 +376,18 @@ fn spawn_banner(mut commands: Commands) {
     ));
 }
 
+/// Show the banner when a level is completed, naming the next level.
 fn show_banner(
     time: Res<Time>,
     completed: Res<LevelsCompleted>,
-    mut banners: Query<(&mut Banner, &mut Visibility)>,
+    level: Option<Res<CurrentLevel>>,
+    mut banners: Query<(&mut Banner, &mut Visibility, &mut Text)>,
 ) {
-    for (mut banner, mut visibility) in &mut banners {
+    for (mut banner, mut visibility, mut text) in &mut banners {
         if completed.is_changed() && completed.0 > 0 {
             banner.0 = BANNER_TIME;
+            let next = level.as_ref().map_or("", |l| l.0.name.as_str());
+            text.0 = format!("Spectrum restored!\n{next}");
         }
         banner.0 = (banner.0 - time.delta_secs()).max(0.0);
         visibility.set_if_neq(if banner.0 > 0.0 {

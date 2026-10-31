@@ -38,10 +38,17 @@ pub const PHYSICS_HZ: f64 = 120.0;
 
 /// Top-level plugin for the whole game.
 #[derive(Debug, Default)]
-pub struct GamePlugin;
+pub struct GamePlugin {
+    /// A level to play over and over instead of the built-in campaign, with
+    /// the file it came from (watched for edits in dev builds).
+    pub level: Option<(level::Level, std::path::PathBuf)>,
+}
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
+        if let Some((level, path)) = &self.level {
+            app.insert_resource(level::Campaign::single(level.clone(), path.clone()));
+        }
         app.insert_resource(ClearColor(BACKGROUND))
             // Different drops each run; tests keep the fixed default seed.
             .insert_resource(powerup::DropRng::seeded(time_seed()))
@@ -51,7 +58,7 @@ impl Plugin for GamePlugin {
                 sound::SoundPlugin,
             ));
         #[cfg(feature = "dev")]
-        app.add_plugins(dev_tools::DevToolsPlugin);
+        app.add_plugins((dev_tools::DevToolsPlugin, level::reload::LevelReloadPlugin));
     }
 }
 
@@ -65,7 +72,7 @@ impl Plugin for SimulationPlugin {
             .add_message::<events::GameEvent>()
             .init_resource::<physics::BounceTuning>()
             .register_type::<physics::BounceTuning>()
-            .add_systems(Startup, (level::spawn_test_room, hero::spawn_hero))
+            .add_systems(Startup, hero::spawn_hero)
             .init_resource::<hero::HoverInput>()
             .add_systems(Update, (hero::spin_input, hero::hover_input))
             .add_systems(
@@ -73,6 +80,7 @@ impl Plugin for SimulationPlugin {
                 (hero::move_hero, hero::update_facing.after(hero::move_hero)),
             )
             .add_plugins((
+                level::LevelPlugin,
                 prism::PrismPlugin,
                 beam::BeamPlugin,
                 enemy::EnemyPlugin,

@@ -91,8 +91,12 @@ impl Plugin for PrismPlugin {
     }
 }
 
-fn spawn_prism(mut commands: Commands, tuning: Res<PrismTuning>) {
-    let start = crate::hero::HERO_SPAWN + orbit_offset(0.0, tuning.orbit_radius);
+fn spawn_prism(
+    mut commands: Commands,
+    tuning: Res<PrismTuning>,
+    level: Res<crate::level::CurrentLevel>,
+) {
+    let start = level.0.start + orbit_offset(0.0, tuning.orbit_radius);
     commands.spawn((
         Name::new("Prism"),
         Prism::default(),

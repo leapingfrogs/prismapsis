@@ -679,6 +679,25 @@ pub fn sounds() -> Vec<Sound> {
         .lowpass(5000.0)
         .echo(0.12, 0.3)
         .peak(0.7),
+        // A soft bell rising to the octave: a place to come back to.
+        Sound::new(
+            "checkpoint",
+            vec![
+                Tone::new(Sine, g5, 0.4).decay(0.15),
+                Tone::new(Sine, c6, 0.7).at(0.09).decay(0.3),
+                Tone::new(Sine, e6 * 2.0, 0.5)
+                    .at(0.09)
+                    .decay(0.12)
+                    .volume(0.15),
+                Tone::new(Triangle, c5 / 2.0, 0.6)
+                    .at(0.09)
+                    .attack(0.03)
+                    .decay(0.25)
+                    .volume(0.35),
+            ],
+        )
+        .echo(0.1, 0.3)
+        .peak(0.5),
         // --- Prism and energy ---
         Sound::new(
             "prism_freeze",

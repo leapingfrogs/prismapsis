@@ -44,6 +44,7 @@ pub enum SoundId {
     ColourRestored,
     SpectrumComplete,
     LevelComplete,
+    Checkpoint,
     PrismFreeze,
     PrismUnfreeze,
     EnergyEmpty,
@@ -98,6 +99,7 @@ sound_files! {
     ColourRestored => "colour_restored",
     SpectrumComplete => "spectrum_complete",
     LevelComplete => "level_complete",
+    Checkpoint => "checkpoint",
     PrismFreeze => "prism_freeze",
     PrismUnfreeze => "prism_unfreeze",
     EnergyEmpty => "energy_empty",
@@ -309,6 +311,7 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
             })
             .collect(),
         GameEvent::ExitReached { at } => vec![Cue::new(SoundId::LevelComplete).at(at)],
+        GameEvent::CheckpointReached { at } => vec![Cue::new(SoundId::Checkpoint).at(at)],
     }
 }
 
@@ -693,6 +696,7 @@ mod tests {
             GameEvent::ColourRestored { hue: Hue::Cyan },
             GameEvent::ColourRestored { hue: Hue::White },
             GameEvent::ExitReached { at },
+            GameEvent::CheckpointReached { at },
         ];
         for event in events {
             assert!(!cues_for(event, &mut combo).is_empty(), "{event:?}");

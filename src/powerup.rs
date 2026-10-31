@@ -17,8 +17,10 @@ pub const PICKUP_RADIUS: f32 = 26.0;
 /// A pickup blinks for this long before it vanishes (seconds).
 pub const PICKUP_WARNING: f32 = 2.0;
 
-/// An ability the hero can collect.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+/// An ability the hero can collect. Level files name them in kebab case,
+/// such as `rapid-fire`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum PowerUp {
     /// No gravity: up/down move the hero directly.
     AntiGravity,

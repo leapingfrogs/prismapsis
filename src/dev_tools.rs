@@ -9,7 +9,8 @@ use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
 use crate::beam::BeamTuning;
 use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
-use crate::hero::{HERO_SPAWN, Hero, Position, PreviousPosition, Spin, Velocity};
+use crate::hero::{Hero, Position, PreviousPosition, Spin, Velocity};
+use crate::level::{CurrentLevel, RespawnPoint};
 use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
@@ -77,6 +78,7 @@ fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<PanelVisibl
 
 fn reset_hero(
     keys: Res<ButtonInput<KeyCode>>,
+    respawn: Res<RespawnPoint>,
     mut heroes: Query<
         (
             &mut Position,
@@ -92,8 +94,8 @@ fn reset_hero(
     }
     for (mut pos, mut prev, mut vel, mut spin) in &mut heroes {
         // Move both so the reset snaps rather than sweeping across the room.
-        *pos = Position(HERO_SPAWN);
-        *prev = PreviousPosition(HERO_SPAWN);
+        *pos = Position(respawn.0);
+        *prev = PreviousPosition(respawn.0);
         *vel = Velocity::default();
         *spin = Spin::default();
     }
@@ -110,7 +112,7 @@ fn tuning_panel(
     mut powerup_tuning: ResMut<PowerUpTuning>,
     mut abilities: ResMut<Abilities>,
     (mut sound, mut light): (SoundPanel, LightPanel),
-    (kills, lives): (Res<Kills>, Res<Lives>),
+    (kills, lives, level): (Res<Kills>, Res<Lives>, Res<CurrentLevel>),
     mut reset_room: ResMut<ResetRoom>,
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
     diagnostics: Res<DiagnosticsStore>,
@@ -146,12 +148,14 @@ fn tuning_panel(
                     *powerup_tuning = PowerUpTuning::default();
                     *sound.settings = SoundSettings::default();
                     *light.tuning = LightTuning::default();
+                    level.0.apply_tuning(&mut enemy_tuning, &mut light.tuning);
                 }
                 if ui.button("Reset room").clicked() {
                     reset_room.0 = true;
                 }
             });
             ui.separator();
+            ui.label(format!("level: {}", level.0.name));
             for (pos, vel, spin) in &heroes {
                 ui.label(format!("spin step: {:+} / ±{MAX_SPIN}", spin.0));
                 ui.label(format!("position: {:.0}, {:.0}", pos.0.x, pos.0.y));

@@ -13,9 +13,9 @@ use bevy::prelude::*;
 use crate::beam::{BeamEnergy, damage_enemies};
 use crate::events::GameEvent;
 use crate::hero::{
-    Facing, HERO_RADIUS, HERO_SPAWN, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
+    Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
 };
-use crate::level::{RoomBounds, Solid, spawn_hidden_pickups, test_lenses};
+use crate::level::{CurrentLevel, LevelRestart, RespawnPoint, RoomBounds, Solid, view_bottom};
 use crate::light::{Colour, LightTuning, Primary, Spectrum};
 use crate::physics::{Aabb, ray_aabb};
 use crate::powerup::{Abilities, DropRng, Pickup, PowerUpTuning, pickup_bundle, roll_drop};
@@ -28,7 +28,8 @@ pub const SPAWN_DISTANCE: f32 = 1150.0;
 /// Gap between motes in a wave (world units).
 const MOTE_SPACING: f32 = 80.0;
 
-/// Wave heights cycle through these, so successive waves vary.
+/// Wave heights above the bottom of the view cycle through these, so
+/// successive waves vary.
 const WAVE_HEIGHTS: [f32; 4] = [220.0, 380.0, 540.0, 300.0];
 
 /// Motes older than this are removed even if still on their way.
@@ -222,12 +223,13 @@ pub struct MoteSpawn {
     pub phase: f32,
 }
 
-/// Where wave number `index` appears around a hero at `hero_x`. Waves
-/// alternate sides, starting from the right, and cycle through heights.
+/// Where wave number `index` appears around a hero at `hero_x`, with the
+/// view's bottom edge at `view_bottom`. Waves alternate sides, starting from
+/// the right, and cycle through heights.
 #[must_use]
-pub fn wave_spawns(hero_x: f32, index: u32, count: u32) -> Vec<MoteSpawn> {
+pub fn wave_spawns(hero_x: f32, view_bottom: f32, index: u32, count: u32) -> Vec<MoteSpawn> {
     let side = if index.is_multiple_of(2) { 1.0 } else { -1.0 };
-    let height = WAVE_HEIGHTS[index as usize % WAVE_HEIGHTS.len()];
+    let height = view_bottom + WAVE_HEIGHTS[index as usize % WAVE_HEIGHTS.len()];
     (0..count)
         .map(|i| {
             #[allow(clippy::cast_precision_loss)]
@@ -310,16 +312,26 @@ fn lens_bundle(center: Vec2, colour: Primary, tuning: &EnemyTuning) -> impl Bund
     )
 }
 
-fn spawn_placed_enemies(mut commands: Commands, tuning: Res<EnemyTuning>) {
-    for (center, colour) in test_lenses() {
-        commands.spawn(lens_bundle(center, colour, &tuning));
+fn spawn_lenses(commands: &mut Commands, level: &CurrentLevel, tuning: &EnemyTuning) {
+    for &(center, colour) in &level.0.lenses {
+        commands.spawn(lens_bundle(center, colour, tuning));
     }
+}
+
+fn spawn_placed_enemies(
+    mut commands: Commands,
+    level: Res<CurrentLevel>,
+    tuning: Res<EnemyTuning>,
+) {
+    spawn_lenses(&mut commands, &level, &tuning);
 }
 
 fn spawn_waves(
     mut commands: Commands,
     time: Res<Time>,
     tuning: Res<EnemyTuning>,
+    level: Res<CurrentLevel>,
+    bounds: Option<Res<RoomBounds>>,
     mut waves: ResMut<WaveTimer>,
     heroes: Query<&Position, With<Hero>>,
 ) {
@@ -336,9 +348,12 @@ fn spawn_waves(
     };
     let index = waves.count;
     waves.count += 1;
-    // Each wave is one colour, cycling red, green, blue.
-    let colour = Primary::ALL[index as usize % Primary::ALL.len()];
-    for spawn in wave_spawns(hero.0.x, index, tuning.wave_size) {
+    // Each wave is one colour, cycling through the level's wave colours.
+    let colours = &level.0.waves.colours;
+    let colour = colours.get(index as usize % colours.len().max(1)).copied();
+    let colour = colour.unwrap_or(Primary::Red);
+    let bottom = bounds.map_or(0.0, |b| view_bottom(hero.0.y, &b.0));
+    for spawn in wave_spawns(hero.0.x, bottom, index, tuning.wave_size) {
         commands.spawn((
             Name::new("Mote"),
             Colour(colour),
@@ -520,6 +535,7 @@ fn hero_hits(
     mut abilities: ResMut<Abilities>,
     mut spectrum: ResMut<Spectrum>,
     mut reset: ResMut<ResetRoom>,
+    respawn: Res<RespawnPoint>,
     enemies: Query<(&Position, &Enemy), Without<Hero>>,
     orbs: Query<(Entity, &Position), (With<Orb>, Without<Hero>)>,
     mut heroes: Query<
@@ -557,7 +573,7 @@ fn hero_hits(
 
     events.write(GameEvent::LifeLost {
         at: pos.0,
-        respawn: HERO_SPAWN,
+        respawn: respawn.0,
     });
     if *abilities != Abilities::default() {
         events.write(GameEvent::AbilitiesLost);
@@ -568,8 +584,8 @@ fn hero_hits(
     if lives.0 == 0 {
         reset.0 = true;
     }
-    pos.0 = HERO_SPAWN;
-    prev.0 = HERO_SPAWN;
+    pos.0 = respawn.0;
+    prev.0 = respawn.0;
     *vel = Velocity::default();
     *spin = Spin::default();
     *facing = Facing::default();
@@ -577,7 +593,8 @@ fn hero_hits(
 }
 
 /// Clear and repopulate the room, refilling lives and energy, removing
-/// pickups and abilities, and greying the spectrum again.
+/// pickups and abilities, greying the spectrum again, and putting the hero
+/// back at the level's start.
 pub fn reset_room(
     mut commands: Commands,
     mut events: MessageWriter<GameEvent>,
@@ -589,6 +606,7 @@ pub fn reset_room(
     mut waves: ResMut<WaveTimer>,
     mut abilities: ResMut<Abilities>,
     mut spectrum: ResMut<Spectrum>,
+    mut level: LevelRestart,
     clear: Query<Entity, Or<(With<Enemy>, With<Orb>, With<Burst>, With<Pickup>)>>,
 ) {
     if !reset.0 {
@@ -599,16 +617,14 @@ pub fn reset_room(
     for entity in &clear {
         commands.entity(entity).despawn();
     }
-    for (center, colour) in test_lenses() {
-        commands.spawn(lens_bundle(center, colour, &tuning));
-    }
+    spawn_lenses(&mut commands, &level.level, &tuning);
     *lives = Lives::default();
     *kills = Kills::default();
     *energy = BeamEnergy::default();
     *waves = WaveTimer::default();
     *abilities = Abilities::default();
     *spectrum = Spectrum::default();
-    spawn_hidden_pickups(&mut commands);
+    level.restart(&mut commands);
 }
 
 fn age_bursts(mut commands: Commands, time: Res<Time>, mut bursts: Query<(Entity, &mut Burst)>) {
@@ -647,6 +663,7 @@ fn tick_invulnerability(
 mod tests {
     use super::*;
     use crate::SimulationPlugin;
+    use crate::level::test_room;
     use bevy::time::TimeUpdateStrategy;
     use std::f32::consts::FRAC_PI_2;
     use std::time::Duration;
@@ -660,7 +677,7 @@ mod tests {
 
     #[test]
     fn waves_alternate_sides_and_head_towards_the_hero() {
-        let first = wave_spawns(1000.0, 0, 5);
+        let first = wave_spawns(1000.0, 0.0, 0, 5);
         assert_eq!(first.len(), 5);
         assert!(
             first
@@ -669,7 +686,7 @@ mod tests {
         );
         assert!(first.iter().all(|m| (m.dir + 1.0).abs() < f32::EPSILON));
 
-        let second = wave_spawns(1000.0, 1, 5);
+        let second = wave_spawns(1000.0, 0.0, 1, 5);
         assert!(
             second
                 .iter()
@@ -677,6 +694,9 @@ mod tests {
         );
         assert!(second.iter().all(|m| (m.dir - 1.0).abs() < f32::EPSILON));
         assert!((first[0].start.y - second[0].start.y).abs() > 1.0);
+        // Heights are measured from the bottom of the view.
+        let raised = wave_spawns(1000.0, 500.0, 0, 5);
+        assert!((raised[0].start.y - first[0].start.y - 500.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -742,7 +762,7 @@ mod tests {
     #[test]
     fn placed_lenses_spawn_with_the_room() {
         let mut app = sim_app();
-        assert_eq!(count::<Lens>(&mut app), test_lenses().len());
+        assert_eq!(count::<Lens>(&mut app), test_room().lenses.len());
     }
 
     #[test]
@@ -816,7 +836,7 @@ mod tests {
             .unwrap()
             .0;
         assert!(invulnerable > 0.0);
-        assert!(hero_position(&mut app).distance(HERO_SPAWN) < 50.0);
+        assert!(hero_position(&mut app).distance(test_room().start) < 50.0);
     }
 
     #[test]
@@ -831,7 +851,7 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Lives>().0, STARTING_LIVES);
         assert_eq!(count::<Mote>(&mut app), 0);
-        assert_eq!(count::<Lens>(&mut app), test_lenses().len());
+        assert_eq!(count::<Lens>(&mut app), test_room().lenses.len());
     }
 
     #[test]
@@ -902,7 +922,7 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Lives>().0, STARTING_LIVES - 1);
         // Another enemy at the respawn point: ignored while invulnerable.
-        spawn_mote_at(&mut app, HERO_SPAWN);
+        spawn_mote_at(&mut app, test_room().start);
         run(&mut app, 30);
         assert_eq!(app.world().resource::<Lives>().0, STARTING_LIVES - 1);
         // Once it wears off, the mote waiting at the respawn point costs
