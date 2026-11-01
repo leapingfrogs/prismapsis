@@ -3,6 +3,7 @@
 //! draws a level in a terminal.
 
 pub mod format;
+pub mod generate;
 pub mod preview;
 #[cfg(feature = "dev")]
 pub mod reload;
@@ -29,6 +30,9 @@ pub const VIEW_HEIGHT: f32 = 1080.0;
 
 /// The test room, built into the game.
 pub const TEST_ROOM: &str = include_str!("../../assets/levels/test_room.toml");
+
+/// The tower, a tall dev level.
+const TOWER: &str = include_str!("../../assets/levels/tower.toml");
 
 /// The test room's file in the source tree, watched for edits in dev builds.
 pub const TEST_ROOM_PATH: &str =
@@ -106,6 +110,37 @@ impl Campaign {
             })
             .collect();
         Self { levels, current: 0 }
+    }
+
+    /// The hand-made dev levels: the test room, then the tower.
+    ///
+    /// # Panics
+    ///
+    /// If an embedded level is invalid, which a test rules out.
+    #[must_use]
+    pub fn dev() -> Self {
+        let tower = match parse(TOWER) {
+            Ok(level) => level,
+            Err(errors) => panic!("the built-in tower is invalid: {errors:?}"),
+        };
+        let path = |file: &str| {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("assets/levels")
+                .join(file)
+        };
+        Self {
+            levels: vec![
+                CampaignLevel {
+                    path: PathBuf::from(TEST_ROOM_PATH),
+                    level: test_room(),
+                },
+                CampaignLevel {
+                    path: path("tower.toml"),
+                    level: tower,
+                },
+            ],
+            current: 0,
+        }
     }
 
     /// A campaign of one level, played over and over.
@@ -229,7 +264,13 @@ pub struct LevelPlugin;
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         if !app.world().contains_resource::<Campaign>() {
-            app.insert_resource(Campaign::built_in());
+            // Tests play the dev levels, so they don't depend on what the
+            // campaign holds.
+            app.insert_resource(if cfg!(test) {
+                Campaign::dev()
+            } else {
+                Campaign::built_in()
+            });
         }
         if !app.world().contains_resource::<CurrentLevel>() {
             let level = app.world().resource::<Campaign>().level().level.clone();
@@ -637,8 +678,8 @@ mod tests {
     #[test]
     fn finishing_a_level_moves_on_through_the_campaign() {
         let mut app = sim_app();
-        let campaign = Campaign::built_in();
-        assert!(campaign.levels.len() >= 2);
+        let campaign = Campaign::dev();
+        assert_eq!(campaign.levels.len(), 2);
         assert_eq!(campaign.level().level, test_room());
 
         finish_level(&mut app);

@@ -1,3 +1,13 @@
 # The levels played in order, each a file in this directory. Finishing the
-# last one leads back to the first.
-levels = ["test_room.toml", "tower.toml"]
+# last one leads back to the first. The test room and the tower are dev
+# levels, played with `--level`.
+levels = [
+    "01-first-light.toml",
+    "02-green-shoots.toml",
+    "03-blue-climb.toml",
+    "04-three-gates.toml",
+    "05-yellow-dawn.toml",
+    "06-cyan-spire.toml",
+    "07-mixed-light.toml",
+    "08-full-spectrum.toml",
+]

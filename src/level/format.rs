@@ -17,6 +17,8 @@ use crate::light::{Hue, LightTuning, Primary};
 use crate::physics::Aabb;
 use crate::powerup::PowerUp;
 
+use super::generate::Recipe;
+
 /// Size of one grid character in world units, unless a level sets `tile`.
 pub const DEFAULT_TILE: f32 = 40.0;
 
@@ -265,6 +267,8 @@ pub struct Level {
     pub pickups: Vec<PlacedPickup>,
     pub waves: Waves,
     pub light: LightSettings,
+    /// The settings a generated level was made from.
+    pub generated: Option<Recipe>,
     /// The layout as written, for tools that show it.
     pub map: Grid,
     pub background: Grid,
@@ -370,6 +374,7 @@ struct LevelFile {
     waves: WavesFile,
     #[serde(default)]
     light: LightSettings,
+    generated: Option<Recipe>,
 }
 
 #[derive(Default, Deserialize)]
@@ -747,6 +752,7 @@ pub fn parse(source: &str) -> Result<Level, Vec<LevelError>> {
         pickups: placed.pickups,
         waves,
         light: file.light,
+        generated: file.generated,
         map,
         background,
         legend,
