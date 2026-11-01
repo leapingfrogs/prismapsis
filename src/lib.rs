@@ -8,6 +8,7 @@
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, WindowMode, WindowResolution};
 
+pub mod art;
 pub mod beam;
 #[cfg(feature = "dev")]
 pub mod dev_tools;

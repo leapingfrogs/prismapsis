@@ -40,6 +40,11 @@ levelgen *args:
 level-show *files:
     cargo run --locked --bin levels -- show {{files}}
 
+# Paint the themed art in assets/art; `--check` reports images that are out
+# of date, and `preview DIR` draws a sample of each theme into DIR
+art *args:
+    cargo run --locked --bin art -- {{args}}
+
 # Regenerate the sound effects in assets/audio from tools/sfx
 sfx:
     cargo run --locked -p sfx

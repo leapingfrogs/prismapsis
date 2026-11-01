@@ -13,7 +13,7 @@ use crate::enemy::{
 };
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{Checkpoint, RoomBounds, Solid};
-use crate::light::{Colour, Hidden, Phantom, Primary};
+use crate::light::{Colour, Hidden, Primary};
 use crate::physics::BounceTuning;
 use crate::powerup::{Abilities, PICKUP_RADIUS, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
@@ -25,7 +25,6 @@ pub const DESIGN_HEIGHT: f32 = crate::level::VIEW_HEIGHT;
 /// How quickly the camera catches up with the hero (per second).
 const CAMERA_FOLLOW_RATE: f32 = 6.0;
 
-const SOLID_COLOUR: Color = Color::srgb(0.32, 0.34, 0.4);
 const HERO_COLOUR: Color = Color::srgb(0.92, 0.92, 0.96);
 const HERO_MARK_COLOUR: Color = Color::srgb(0.35, 0.75, 0.95);
 
@@ -49,7 +48,6 @@ impl Plugin for PresentationPlugin {
             .add_systems(
                 Update,
                 (
-                    draw_solids,
                     draw_hero,
                     draw_prism,
                     toggle_fullscreen,
@@ -80,7 +78,10 @@ impl Plugin for PresentationPlugin {
                     light_checkpoints,
                 ),
             )
-            .add_plugins(crate::spectrum_view::SpectrumViewPlugin);
+            .add_plugins((
+                crate::spectrum_view::SpectrumViewPlugin,
+                crate::art::tiles::TilesPlugin,
+            ));
     }
 }
 
@@ -176,24 +177,6 @@ fn spawn_camera(mut commands: Commands) {
             ..OrthographicProjection::default_2d()
         }),
     ));
-}
-
-fn draw_solids(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    // Phantoms draw themselves, even once solid.
-    solids: Query<(Entity, &Solid), (Added<Solid>, Without<Phantom>)>,
-) {
-    for (entity, solid) in &solids {
-        let size = solid.0.size();
-        // Each has its own material, so colour can wash back per solid.
-        commands.entity(entity).insert((
-            Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(materials.add(SOLID_COLOUR)),
-            Transform::from_translation(solid.0.center().extend(0.0)),
-        ));
-    }
 }
 
 const CHECKPOINT_IDLE: Color = Color::srgb(0.45, 0.47, 0.55);
@@ -1016,11 +999,18 @@ mod tests {
         }
         let world = app.world_mut();
 
-        let undrawn = world
-            .query_filtered::<&Solid, Without<Mesh2d>>()
+        // Walls are drawn together as one tiled mesh, and scenery as another.
+        let tiled = world
+            .query_filtered::<(), (With<crate::art::tiles::WallMesh>, With<Mesh2d>)>()
             .iter(world)
             .count();
-        assert_eq!(undrawn, 0);
+        assert_eq!(tiled, 1);
+        let panels = world
+            .query_filtered::<(), (With<crate::art::tiles::PanelMesh>, With<Mesh2d>)>()
+            .iter(world)
+            .count();
+        assert_eq!(panels, 1, "scenery is drawn as panels");
+        assert!(world.query::<&Solid>().iter(world).count() > 1);
 
         let (pos, prev, transform) = world
             .query_filtered::<(&Position, &PreviousPosition, &Transform), With<Hero>>()

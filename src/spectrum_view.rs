@@ -5,10 +5,8 @@
 
 use bevy::prelude::*;
 
-use crate::level::{CurrentLevel, Scenery, Solid};
-use crate::light::{
-    ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Shade, Spectrum,
-};
+use crate::level::{CurrentLevel, Solid};
+use crate::light::{ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Spectrum};
 
 /// Display colour of each hue.
 #[must_use]
@@ -23,15 +21,6 @@ pub const fn hue_colour(hue: Hue) -> Color {
         Hue::White => Color::srgb(0.95, 0.95, 0.97),
     }
 }
-
-/// Greyscale versions of solids and scenery, before colour returns.
-const SOLID_GREY: Color = Color::srgb(0.32, 0.34, 0.4);
-const SCENERY_GREY: Color = Color::srgb(0.1, 0.1, 0.13);
-
-/// How strongly restored hues show on solids and on scenery (scenery stays
-/// dim so it reads as background).
-const SOLID_STRENGTH: f32 = 0.6;
-const SCENERY_STRENGTH: f32 = 0.28;
 
 /// The background once the whole spectrum is back.
 const BACKGROUND_RESTORED: Color = Color::srgb(0.06, 0.06, 0.15);
@@ -56,18 +45,6 @@ impl Wash {
     }
 }
 
-/// Colour of a shaded solid or piece of scenery given how washed its hue is.
-#[must_use]
-pub fn shaded_colour(hue: Hue, wash: f32, scenery: bool) -> Color {
-    let (grey, strength) = if scenery {
-        (SCENERY_GREY, SCENERY_STRENGTH)
-    } else {
-        (SOLID_GREY, SOLID_STRENGTH)
-    };
-    let full = Color::BLACK.mix(&hue_colour(hue), strength);
-    grey.mix(&full, wash.clamp(0.0, 1.0))
-}
-
 #[derive(Debug, Default)]
 pub struct SpectrumViewPlugin;
 
@@ -79,10 +56,9 @@ impl Plugin for SpectrumViewPlugin {
                 Update,
                 (
                     advance_wash,
-                    draw_scenery,
                     draw_phantoms,
                     draw_exit,
-                    (wash_world, show_phantoms, animate_exit, tint_background).after(advance_wash),
+                    (show_phantoms, animate_exit, tint_background).after(advance_wash),
                     update_gauges,
                     show_banner,
                 ),
@@ -104,44 +80,6 @@ fn advance_wash(time: Res<Time>, spectrum: Res<Spectrum>, mut wash: ResMut<Wash>
     }
     if next != *wash {
         *wash = next;
-    }
-}
-
-fn draw_scenery(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    scenery: Query<(Entity, &Scenery, Option<&Shade>), Added<Scenery>>,
-) {
-    for (entity, scenery, shade) in &scenery {
-        let size = scenery.0.size();
-        // Scenery without a hue stays grey.
-        let colour = shade.map_or(SCENERY_GREY, |s| shaded_colour(s.0, 0.0, true));
-        commands.entity(entity).insert((
-            Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(materials.add(colour)),
-            Transform::from_translation(scenery.0.center().extend(-1.0)),
-        ));
-    }
-}
-
-/// Recolour shaded solids and scenery as colour washes back in.
-fn wash_world(
-    wash: Res<Wash>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    shaded: Query<(&Shade, Has<Scenery>, &MeshMaterial2d<ColorMaterial>)>,
-    added: Query<(), Added<MeshMaterial2d<ColorMaterial>>>,
-) {
-    if !wash.is_changed() && added.is_empty() {
-        return;
-    }
-    for (shade, scenery, material) in &shaded {
-        if let Some(mut material) = materials.get_mut(&material.0) {
-            let colour = shaded_colour(shade.0, wash.of(shade.0), scenery);
-            if material.color != colour {
-                material.color = colour;
-            }
-        }
     }
 }
 
@@ -413,16 +351,6 @@ mod tests {
         assert!(wash.of(Hue::White).abs() < f32::EPSILON);
     }
 
-    #[test]
-    fn shading_runs_from_grey_to_colour() {
-        assert_eq!(shaded_colour(Hue::Red, 0.0, false), SOLID_GREY);
-        assert_eq!(shaded_colour(Hue::Red, 0.0, true), SCENERY_GREY);
-        let red = shaded_colour(Hue::Red, 1.0, false).to_srgba();
-        assert!(red.red > red.green && red.red > red.blue);
-        let blue = shaded_colour(Hue::Blue, 1.0, true).to_srgba();
-        assert!(blue.blue > blue.red);
-    }
-
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
@@ -460,12 +388,19 @@ mod tests {
             .collect()
     }
 
+    /// How far each tileset's art has been told colour is restored.
+    fn washes(app: &App) -> Vec<Vec4> {
+        let materials = app
+            .world()
+            .resource::<Assets<crate::art::tiles::WorldMaterial>>();
+        materials.iter().map(|(_, m)| m.wash).collect()
+    }
+
     #[test]
     fn restoring_a_colour_floods_it_into_the_world() {
         let mut app = app();
         run(&mut app, 2);
-        let grey = colour_of::<(With<Shade>, With<Solid>)>(&mut app);
-        assert!(grey.iter().all(|&c| c == SOLID_GREY));
+        assert_eq!(washes(&app), vec![Vec4::ZERO; 2], "walls and scenery");
         for primary in Primary::ALL {
             app.world_mut()
                 .resource_mut::<Spectrum>()
@@ -476,8 +411,7 @@ mod tests {
         assert!(partway > 0.0 && partway < 1.0, "should flood in gradually");
         run(&mut app, 200);
         assert_eq!(app.world().resource::<Wash>().0, [1.0; 3]);
-        let coloured = colour_of::<(With<Shade>, With<Solid>)>(&mut app);
-        assert!(coloured.iter().all(|&c| c != SOLID_GREY));
+        assert_eq!(washes(&app), vec![Vec4::new(1.0, 1.0, 1.0, 0.0); 2]);
         assert_eq!(app.world().resource::<ClearColor>().0, BACKGROUND_RESTORED);
     }
 
@@ -501,9 +435,6 @@ mod tests {
             .filter(|&&a| (a - 1.0).abs() < f32::EPSILON)
             .count();
         assert_eq!(filled, 1, "only the green phantom fills");
-        // Solid phantoms keep their own look rather than the solids'.
-        let solid_phantom_meshes = colour_of::<(With<Phantom>, With<Solid>)>(&mut app);
-        assert!(solid_phantom_meshes.iter().all(|&c| c != SOLID_GREY));
     }
 
     #[test]

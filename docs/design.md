@@ -355,7 +355,47 @@ output is committed; the game only ever loads level files.
 - The world is **1080 units tall** at any window size; width follows the
   aspect ratio.
 - At 4K each world unit covers 2×2 pixels, so sprite art should be authored
-  at **2× its in-world size** to stay sharp at 4K.
+  at **2× its in-world size** to stay sharp at 4K: an 80 px tile for a
+  40-unit cell.
+
+### Generated art
+
+- **All art is generated offline and committed**, like the levels and sound
+  effects: the `art` tool draws it into `assets/art/`, `just art` regenerates
+  it, and an up-to-date check fails when a committed image differs. Generated
+  images are never hand-edited.
+- **Walls use edge and corner tiles chosen on a dual grid.** Tiles are drawn
+  on a grid offset half a cell from the level grid; each looks at the four
+  cells it overlaps, wall or empty, and picks one of 16 tiles. All 16 are
+  drawn, rather than rotating a few, because light comes from above: tops
+  are lit and undersides shaded. Solid interiors get a few variants, picked
+  by a hash of the position, so long walls don't visibly repeat.
+- **Each tile kind is its own set of 16**, in its own tileset, so each 6b
+  tile kind adds a set when it's built. Collision is unchanged: tiles only
+  draw the cells the level already has.
+- **Scenery is drawn as panels set back behind the walls**, on the same dual
+  grid with a set of its own: a stone frame round leaded glass, with a rose
+  window, a lit pane or broken panes in the solid variants. The glass is
+  pale, so a panel's hue tints it strongly and it waits for that hue to be
+  restored; a panel with no hue stays grey. Panels are darker than walls,
+  draw nothing in open space (no grass or shadows), and treat beyond the
+  room as empty, so they never read as something to bounce off.
+- **Themes are drawn in full colour; a filter takes the colour out.** The
+  shader finds each pixel's hue and how much of that hue has been restored,
+  using the same rule as the wash (a secondary is limited by its less
+  restored primary, and hues in between blend), and pulls the pixel towards
+  grey by what's missing. A level starts grey, and the red parts of its
+  theme return as red does, yellow once red and green are back. Only the
+  world (walls, scenery, background) is filtered: the hero, enemies, pickups
+  and phantoms keep their colours, so an enemy's colour always reads.
+- **Themes follow the campaign order**, a few levels per theme, so each
+  stretch of the campaign feels like its own world. A theme sets its wall
+  materials, palette, background colour and, later, background layers and
+  props.
+- **Sprites** for the hero, enemies, orbs, pickups and the prism are drawn
+  in white and greys and tinted in the game, so one sheet serves every
+  colour. The hero's surface turns with its spin while its highlight stays
+  on top, and it squashes and stretches on each bounce.
 
 ## Sound
 
@@ -422,5 +462,9 @@ output is committed; the game only ever loads level files.
 | 6b | Tile kinds | One-way, moving, crumbling and colour-breakable platforms; spring and mud bounce modifiers; mirror walls reflecting the beam. |
 | 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
-| 7 | Game loop | Menus, pause, game over, score, music, audio settings. |
-| 8+ | 3D | To be designed. |
+| 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |
+| 7b | Themes | More themes following the campaign order, each with its own background colour. |
+| 7c | Sprites | Generated, animated sprites for the hero, enemies, orbs, pickups and the prism. |
+| 7d | Backdrops | Parallax background layers and props per theme. |
+| 8 | Game loop | Menus, game over, score, music, audio settings. Pause is done. |
+| 9+ | 3D | To be designed. |
