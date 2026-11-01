@@ -8,7 +8,7 @@
 
 use bevy::prelude::*;
 
-use crate::enemy::ResetRoom;
+use crate::enemy::{KeepAbilities, ResetRoom};
 use crate::events::GameEvent;
 use crate::hero::{HERO_RADIUS, Hero, Position, move_hero};
 use crate::level::Solid;
@@ -245,10 +245,10 @@ fn reveal_hidden(
 }
 
 /// With white restored, touching the exit completes the level; `level` then
-/// moves on to the next one.
+/// moves on to the next one, and the hero keeps its abilities.
 pub fn reach_exit(
     spectrum: Res<Spectrum>,
-    mut reset: ResMut<ResetRoom>,
+    (mut reset, mut keep): (ResMut<ResetRoom>, ResMut<KeepAbilities>),
     mut completed: ResMut<LevelsCompleted>,
     mut events: MessageWriter<GameEvent>,
     heroes: Query<&Position, With<Hero>>,
@@ -266,6 +266,7 @@ pub fn reach_exit(
     {
         completed.0 += 1;
         reset.0 = true;
+        keep.0 = true;
         events.write(GameEvent::ExitReached { at: hero.0 });
     }
 }
@@ -275,7 +276,7 @@ mod tests {
     use super::*;
     use crate::SimulationPlugin;
     use crate::enemy::{Enemy, EnemyKind, Lives, STARTING_LIVES, WaveTimer};
-    use crate::powerup::{Abilities, Pickup};
+    use crate::powerup::{Abilities, Pickup, PowerUp};
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
 
@@ -467,7 +468,7 @@ mod tests {
         let pickup = app
             .world_mut()
             .spawn((
-                crate::powerup::pickup_bundle(crate::powerup::PowerUp::Spread, hero),
+                crate::powerup::pickup_bundle(PowerUp::Spread, hero),
                 Hidden(Hue::Cyan),
             ))
             .id();
@@ -481,11 +482,7 @@ mod tests {
         spectrum.restore(Primary::Blue, CAP);
         app.update();
         app.update();
-        assert!(
-            app.world()
-                .resource::<Abilities>()
-                .has(crate::powerup::PowerUp::Spread)
-        );
+        assert!(app.world().resource::<Abilities>().has(PowerUp::Spread));
     }
 
     fn gate(app: &mut App) -> Aabb {
@@ -510,6 +507,9 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<LevelsCompleted>().0, 0, "closed");
 
+        let mut abilities = Abilities::default();
+        abilities.grant(PowerUp::Spread);
+        app.insert_resource(abilities);
         let mut spectrum = app.world_mut().resource_mut::<Spectrum>();
         for primary in Primary::ALL {
             spectrum.restore(primary, CAP);
@@ -517,8 +517,14 @@ mod tests {
         put_hero_at(&mut app, exit);
         app.update();
         assert_eq!(app.world().resource::<LevelsCompleted>().0, 1);
-        // The room restarts with a fresh spectrum.
+        // The room restarts with a fresh spectrum, and the hero keeps its
+        // abilities.
         app.update();
         assert_eq!(*app.world().resource::<Spectrum>(), Spectrum::default());
+        assert_eq!(*app.world().resource::<Abilities>(), abilities);
+        // Other resets still take them away.
+        app.insert_resource(ResetRoom(true));
+        app.update();
+        assert_eq!(*app.world().resource::<Abilities>(), Abilities::default());
     }
 }
