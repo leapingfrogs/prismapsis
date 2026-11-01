@@ -22,9 +22,6 @@ pub const fn hue_colour(hue: Hue) -> Color {
     }
 }
 
-/// The background once the whole spectrum is back.
-const BACKGROUND_RESTORED: Color = Color::srgb(0.06, 0.06, 0.15);
-
 /// How fast a restored colour floods in (fraction per second).
 const WASH_RATE: f32 = 0.6;
 
@@ -58,7 +55,7 @@ impl Plugin for SpectrumViewPlugin {
                     advance_wash,
                     draw_phantoms,
                     draw_exit,
-                    (show_phantoms, animate_exit, tint_background).after(advance_wash),
+                    (show_phantoms, animate_exit).after(advance_wash),
                     update_gauges,
                     show_banner,
                 ),
@@ -211,16 +208,6 @@ fn animate_exit(
             glow.color = EXIT_CLOSED.mix(&white, open).with_alpha(alpha);
         }
     }
-}
-
-fn tint_background(wash: Res<Wash>, clear: Option<ResMut<ClearColor>>) {
-    let Some(mut clear) = clear else {
-        return;
-    };
-    if !wash.is_changed() {
-        return;
-    }
-    clear.0 = crate::BACKGROUND.mix(&BACKGROUND_RESTORED, wash.of(Hue::White));
 }
 
 /// The fill of one primary's gauge in the HUD.
@@ -400,7 +387,12 @@ mod tests {
     fn restoring_a_colour_floods_it_into_the_world() {
         let mut app = app();
         run(&mut app, 2);
-        assert_eq!(washes(&app), vec![Vec4::ZERO; 2], "walls and scenery");
+        let tilesets = 2 * crate::art::paint::themes().len();
+        assert_eq!(
+            washes(&app),
+            vec![Vec4::ZERO; tilesets],
+            "walls and scenery"
+        );
         for primary in Primary::ALL {
             app.world_mut()
                 .resource_mut::<Spectrum>()
@@ -411,8 +403,9 @@ mod tests {
         assert!(partway > 0.0 && partway < 1.0, "should flood in gradually");
         run(&mut app, 200);
         assert_eq!(app.world().resource::<Wash>().0, [1.0; 3]);
-        assert_eq!(washes(&app), vec![Vec4::new(1.0, 1.0, 1.0, 0.0); 2]);
-        assert_eq!(app.world().resource::<ClearColor>().0, BACKGROUND_RESTORED);
+        assert_eq!(washes(&app), vec![Vec4::new(1.0, 1.0, 1.0, 0.0); tilesets]);
+        let restored = crate::art::tiles::background(0, [1.0; 3]);
+        assert_eq!(app.world().resource::<ClearColor>().0, restored);
     }
 
     #[test]
