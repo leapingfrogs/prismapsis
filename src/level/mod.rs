@@ -6,6 +6,7 @@ pub mod format;
 pub mod preview;
 #[cfg(feature = "dev")]
 pub mod reload;
+pub mod solve;
 
 use std::path::{Path, PathBuf};
 
@@ -33,12 +34,10 @@ pub const TEST_ROOM: &str = include_str!("../../assets/levels/test_room.toml");
 pub const TEST_ROOM_PATH: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/assets/levels/test_room.toml");
 
-/// The levels played in order, built into the game: each file's name in
-/// `assets/levels` and its contents.
-const CAMPAIGN: &[(&str, &str)] = &[
-    ("test_room.toml", TEST_ROOM),
-    ("tower.toml", include_str!("../../assets/levels/tower.toml")),
-];
+/// The levels played in order, built into the game from
+/// `assets/levels/campaign.toml`: each file's name in `assets/levels` and
+/// its contents.
+const CAMPAIGN: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/campaign.rs"));
 
 /// Static geometry the hero bounces off.
 #[derive(Component, Debug, Clone, Copy, Reflect)]
@@ -162,6 +161,58 @@ pub fn load(path: &Path) -> Result<Level, String> {
             .collect::<Vec<_>>()
             .join("\n")
     })
+}
+
+/// The campaign's file name in a levels directory; it lists levels rather
+/// than being one.
+pub const CAMPAIGN_FILE: &str = "campaign.toml";
+
+/// Every level file in `dir`, sorted: its `.toml` files except the campaign.
+///
+/// # Errors
+///
+/// If the directory can't be read.
+pub fn level_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        let toml = path.extension().is_some_and(|e| e == "toml");
+        if toml && path.file_name().is_some_and(|n| n != CAMPAIGN_FILE) {
+            files.push(path);
+        }
+    }
+    files.sort();
+    Ok(files)
+}
+
+/// The level files a campaign file lists, in play order, beside it.
+///
+/// # Errors
+///
+/// If the file can't be read, isn't a campaign, or lists a level that's
+/// not there.
+pub fn campaign_levels(path: &Path) -> Result<Vec<PathBuf>, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct CampaignFile {
+        levels: Vec<String>,
+    }
+    let problem = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
+    let source = std::fs::read_to_string(path).map_err(|e| problem(&e))?;
+    let campaign: CampaignFile = toml::from_str(&source).map_err(|e| problem(&e))?;
+    let dir = path.parent().unwrap_or_else(|| Path::new(""));
+    campaign
+        .levels
+        .iter()
+        .map(|file| {
+            let level = dir.join(file);
+            if level.is_file() {
+                Ok(level)
+            } else {
+                Err(problem(&format!("{file} not found")))
+            }
+        })
+        .collect()
 }
 
 /// Bottom of the view when it follows a hero at `hero_y`, keeping inside the
@@ -395,15 +446,21 @@ mod tests {
     #[test]
     fn every_level_file_is_valid() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels");
-        let mut count = 0;
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_some_and(|e| e == "toml") {
-                load(&path).unwrap();
-                count += 1;
-            }
+        let files = level_files(&dir).unwrap();
+        assert!(files.len() >= 2);
+        assert!(!files.iter().any(|f| f.ends_with(CAMPAIGN_FILE)));
+        for path in &files {
+            load(path).unwrap();
         }
-        assert!(count >= 1);
+        // The campaign lists level files that are there, and the game
+        // embeds them in the same order.
+        let listed = campaign_levels(&dir.join(CAMPAIGN_FILE)).unwrap();
+        assert_eq!(listed.len(), CAMPAIGN.len());
+        for (path, (file, source)) in listed.iter().zip(CAMPAIGN) {
+            assert_eq!(*path, dir.join(file));
+            assert!(files.contains(path));
+            parse(source).unwrap();
+        }
         assert_eq!(load(Path::new(TEST_ROOM_PATH)), Ok(test_room()));
     }
 
@@ -423,6 +480,25 @@ mod tests {
                 .all(|l| l.starts_with(&*path.to_string_lossy()))
         );
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn campaign_problems_name_the_file() {
+        let dir = std::env::temp_dir().join(format!("prismapsis-campaign-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(CAMPAIGN_FILE);
+        let with = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            campaign_levels(&path)
+        };
+        std::fs::write(dir.join("a.toml"), "").unwrap();
+        assert_eq!(with("levels = [\"a.toml\"]"), Ok(vec![dir.join("a.toml")]));
+        let missing = with("levels = [\"a.toml\", \"b.toml\"]").unwrap_err();
+        assert!(missing.ends_with("b.toml not found"), "{missing}");
+        let level = with("name = \"Not a campaign\"").unwrap_err();
+        assert!(level.starts_with(&*path.to_string_lossy()), "{level}");
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(campaign_levels(&path).is_err());
     }
 
     #[test]
