@@ -150,6 +150,8 @@ starting points to be adjusted in play.
   spin and bounces.
 - **Only the hero** can collect power-ups (not the prism).
 - Collected abilities are **kept until the hero dies**, then all are lost.
+  They carry on into the next level when the hero finishes one, as only
+  losing a life takes them away.
 - Each drop **shows which power-up it holds**, so players can decide
   whether it is worth the detour.
 - Drops **favour abilities the hero doesn't have yet**, so a fresh life

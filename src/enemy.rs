@@ -192,6 +192,12 @@ pub struct Kills {
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ResetRoom(pub bool);
 
+/// Set with `ResetRoom` when the hero finishes the level: it keeps the
+/// abilities it has collected into the next one. Abilities are only lost by
+/// losing a life.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct KeepAbilities(pub bool);
+
 /// Times the waves.
 #[derive(Resource, Debug)]
 pub struct WaveTimer {
@@ -278,6 +284,7 @@ impl Plugin for EnemyPlugin {
             .init_resource::<Lives>()
             .init_resource::<Kills>()
             .init_resource::<ResetRoom>()
+            .init_resource::<KeepAbilities>()
             .init_resource::<WaveTimer>()
             .add_systems(Startup, spawn_placed_enemies)
             .add_systems(
@@ -593,8 +600,8 @@ fn hero_hits(
 }
 
 /// Clear and repopulate the room, refilling lives and energy, removing
-/// pickups and abilities, greying the spectrum again, and putting the hero
-/// back at the level's start.
+/// pickups and (unless the level was finished) abilities, greying the
+/// spectrum again, and putting the hero back at the level's start.
 pub fn reset_room(
     mut commands: Commands,
     mut events: MessageWriter<GameEvent>,
@@ -604,7 +611,7 @@ pub fn reset_room(
     mut kills: ResMut<Kills>,
     mut energy: ResMut<BeamEnergy>,
     mut waves: ResMut<WaveTimer>,
-    mut abilities: ResMut<Abilities>,
+    (mut abilities, mut keep): (ResMut<Abilities>, ResMut<KeepAbilities>),
     mut spectrum: ResMut<Spectrum>,
     mut level: LevelRestart,
     clear: Query<Entity, Or<(With<Enemy>, With<Orb>, With<Burst>, With<Pickup>)>>,
@@ -622,7 +629,10 @@ pub fn reset_room(
     *kills = Kills::default();
     *energy = BeamEnergy::default();
     *waves = WaveTimer::default();
-    *abilities = Abilities::default();
+    if !keep.0 {
+        *abilities = Abilities::default();
+    }
+    keep.0 = false;
     *spectrum = Spectrum::default();
     level.restart(&mut commands);
 }
