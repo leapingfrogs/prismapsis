@@ -30,6 +30,11 @@ run-gamescope *args:
 level-check *files:
     cargo run --locked --bin levels -- check {{files}}
 
+# Remake generated levels from their [generated] settings; --check only
+# reports files that are out of date
+levelgen *args:
+    cargo run --locked --bin levels -- generate {{args}}
+
 # Print level maps in colour (every level by default; the campaign file
 # shows its levels in play order)
 level-show *files:

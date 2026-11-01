@@ -74,6 +74,31 @@ fn names(primaries: &[Primary]) -> String {
     names.join(", ")
 }
 
+/// How much of the hero's movement a search may use.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Limits {
+    /// Fraction of the full bounce height.
+    pub apex: f32,
+    /// Highest spin step.
+    pub max_spin: i8,
+}
+
+impl Limits {
+    /// Everything the hero can do.
+    pub const FULL: Self = Self {
+        apex: 1.0,
+        max_spin: MAX_SPIN,
+    };
+
+    /// A hero with a quarter of its bounce and its top spin held back. A
+    /// level this hero can finish asks for no jump at the edge of the
+    /// real hero's reach.
+    pub const COMFORT: Self = Self {
+        apex: 0.75,
+        max_spin: MAX_SPIN - 1,
+    };
+}
+
 /// How a level can be finished.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Solution {
@@ -177,11 +202,13 @@ enum Step {
 }
 
 /// What the hero can reach in one state.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Explored {
     /// Where the hero can be: landings while bouncing, open places while
     /// hovering.
     places: Vec<Vec2>,
+    /// Each place's key, from `World::key`.
+    keys: HashSet<(i32, i32)>,
     exit: bool,
     /// Where the hero can pick up anti-gravity.
     anti_gravity: Option<Vec2>,
@@ -194,6 +221,7 @@ struct World<'a> {
     level: &'a Level,
     bounce: BounceTuning,
     light: LightTuning,
+    max_spin: i8,
     /// Whether waves bring each primary.
     waves: [bool; 3],
     dt: f32,
@@ -219,7 +247,7 @@ fn nearby(solids: &[Aabb], x: f32) -> Vec<Aabb> {
 }
 
 impl<'a> World<'a> {
-    fn new(level: &'a Level) -> Self {
+    fn new(level: &'a Level, limits: Limits) -> Self {
         let mut enemy = EnemyTuning::default();
         let mut light = LightTuning::default();
         level.apply_tuning(&mut enemy, &mut light);
@@ -231,8 +259,12 @@ impl<'a> World<'a> {
         let max_steps = (MAX_ARC / dt).ceil() as usize;
         Self {
             level,
-            bounce: BounceTuning::default(),
+            bounce: BounceTuning {
+                apex_height: BounceTuning::default().apex_height * limits.apex,
+                ..BounceTuning::default()
+            },
             light,
+            max_spin: limits.max_spin,
             waves,
             dt,
             max_steps,
@@ -334,13 +366,7 @@ impl<'a> World<'a> {
     /// falling from rest.
     fn bounce(&self, restored: Restored, seeds: &[Vec2], out: &mut Explored) {
         let solids = self.solids(restored);
-        let key = |at: Vec2| {
-            // Places are inside the level, so these casts cannot truncate.
-            #[allow(clippy::cast_possible_truncation)]
-            let key = ((at.x / LANDING_GRID).round() as i32, at.y.round() as i32);
-            key
-        };
-        let mut seen = HashSet::new();
+        let key = |at| Self::key(false, at);
         let mut queue = VecDeque::new();
         for &seed in seeds {
             // A phantom that has just turned solid around the hero waits for
@@ -349,7 +375,7 @@ impl<'a> World<'a> {
                 continue;
             }
             if let Some(landing) = self.arc(seed, Vec2::ZERO, 0, restored, &solids, out)
-                && seen.insert(key(landing))
+                && out.keys.insert(key(landing))
             {
                 queue.push_back(landing);
             }
@@ -357,10 +383,10 @@ impl<'a> World<'a> {
         let launch = self.bounce.bounce_speed();
         while let Some(from) = queue.pop_front() {
             out.places.push(from);
-            for spin in -MAX_SPIN..=MAX_SPIN {
+            for spin in -self.max_spin..=self.max_spin {
                 let vel = Vec2::new(self.bounce.horizontal_speed(spin), launch);
                 if let Some(landing) = self.arc(from, vel, spin, restored, &solids, out)
-                    && seen.insert(key(landing))
+                    && out.keys.insert(key(landing))
                 {
                     queue.push_back(landing);
                 }
@@ -406,6 +432,7 @@ impl<'a> World<'a> {
         while let Some((col, row)) = queue.pop_front() {
             let at = place(col, row);
             out.places.push(at);
+            out.keys.insert(Self::key(true, at));
             let sight = col % SIGHT_EVERY == 0 && row % SIGHT_EVERY == 0;
             self.touch(at, restored, &solids, sight, out);
             let neighbours = [
@@ -421,6 +448,37 @@ impl<'a> World<'a> {
                 }
             }
         }
+    }
+
+    /// Places closer than the search tells apart share a key: landings by
+    /// their height and `LANDING_GRID` across, hover places by grid cell.
+    fn key(hovering: bool, at: Vec2) -> (i32, i32) {
+        // Places are inside the level, so these casts cannot truncate.
+        #[allow(clippy::cast_possible_truncation)]
+        if hovering {
+            let cell = (at / HOVER_GRID).round();
+            (cell.x as i32, cell.y as i32)
+        } else {
+            ((at.x / LANDING_GRID).round() as i32, at.y.round() as i32)
+        }
+    }
+
+    /// What exploring depends on besides where it starts: which phantoms
+    /// are solid, which pickups show, and whether the hero hovers. States
+    /// that share these reach the same places from the same starts.
+    fn signature(&self, state: State) -> (Vec<bool>, Vec<bool>, bool) {
+        let level = self.level;
+        let phantoms = level
+            .phantoms
+            .iter()
+            .map(|&(_, hue)| is_restored(hue, state.restored))
+            .collect();
+        let pickups = level
+            .pickups
+            .iter()
+            .map(|p| p.hidden.is_none_or(|hue| is_restored(hue, state.restored)))
+            .collect();
+        (phantoms, pickups, state.hovering)
     }
 
     fn explore(&self, state: State, seeds: &[Vec2]) -> Explored {
@@ -464,10 +522,20 @@ impl<'a> World<'a> {
 ///
 /// Says why the level can't be finished.
 pub fn solve(level: &Level) -> Result<Solution, Unsolvable> {
-    let world = World::new(level);
+    solve_within(level, Limits::FULL)
+}
+
+/// Whether `level` can be finished by a hero held to `limits`, and how.
+///
+/// # Errors
+///
+/// Says why the level can't be finished.
+pub fn solve_within(level: &Level, limits: Limits) -> Result<Solution, Unsolvable> {
+    let world = World::new(level, limits);
     let mut seeds: Vec<Vec<Vec2>> = vec![Vec::new(); State::COUNT];
     let mut came_from: Vec<Option<(State, Step)>> = vec![None; State::COUNT];
     let mut explored: Vec<Option<Explored>> = (0..State::COUNT).map(|_| None).collect();
+    let mut searched: Vec<((Vec<bool>, Vec<bool>, bool), usize)> = Vec::new();
     let start = State {
         restored: 0,
         hovering: false,
@@ -478,7 +546,21 @@ pub fn solve(level: &Level) -> Result<Solution, Unsolvable> {
         if seeds[state.index()].is_empty() {
             continue;
         }
-        let here = world.explore(state, &seeds[state.index()]);
+        // An earlier state with the same signature that already reached
+        // every start reaches just what this one would.
+        let signature = world.signature(state);
+        let starts = &seeds[state.index()];
+        let earlier = searched
+            .iter()
+            .filter(|(s, _)| *s == signature)
+            .filter_map(|&(_, i)| explored[i].as_ref())
+            .find(|e| {
+                starts
+                    .iter()
+                    .all(|&at| e.keys.contains(&World::key(state.hovering, at)))
+            });
+        let here = earlier.map_or_else(|| world.explore(state, starts), Clone::clone);
+        searched.push((signature, state.index()));
         let mut lead = |next: State, step: Step, places: &[Vec2]| {
             seeds[next.index()].extend_from_slice(places);
             came_from[next.index()].get_or_insert((state, step));
@@ -635,6 +717,18 @@ mod tests {
         assert_eq!(solution.restores.len(), 3);
         assert!(!solution.anti_gravity);
         assert_eq!(solve(&level(HIGH, "")), Err(Unsolvable::ExitOutOfReach));
+    }
+
+    #[test]
+    fn a_ledge_at_full_bounce_height_is_not_comfortable() {
+        let ledge = level(LEDGE, "");
+        assert!(solve_within(&ledge, Limits::FULL).is_ok());
+        assert_eq!(
+            solve_within(&ledge, Limits::COMFORT),
+            Err(Unsolvable::ExitOutOfReach)
+        );
+        // The phantom steps halve the climb, so they're comfortable.
+        assert!(solve_within(&level(&stepped(), ""), Limits::COMFORT).is_ok());
     }
 
     #[test]
