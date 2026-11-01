@@ -120,23 +120,95 @@ pub struct Contacts {
     pub wall: bool,
 }
 
+/// How a solid behaves beyond stopping things, as set in a level's legend.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct Traits {
+    /// Only its top is solid: bodies pass up through it and land on it.
+    pub one_way: bool,
+    /// Multiplies the height of bounces off its top: above 1 is a spring,
+    /// below 1 is mud.
+    pub bounce: f32,
+    /// Every face reflects the beam.
+    pub mirror: bool,
+}
+
+impl Default for Traits {
+    fn default() -> Self {
+        Self {
+            one_way: false,
+            bounce: 1.0,
+            mirror: false,
+        }
+    }
+}
+
+/// A solid with its traits, as the physics sees it. A plain `Aabb` is an
+/// ordinary solid.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Surface {
+    pub aabb: Aabb,
+    pub traits: Traits,
+}
+
+impl From<Aabb> for Surface {
+    fn from(aabb: Aabb) -> Self {
+        Self {
+            aabb,
+            traits: Traits::default(),
+        }
+    }
+}
+
+impl From<&Aabb> for Surface {
+    fn from(aabb: &Aabb) -> Self {
+        (*aabb).into()
+    }
+}
+
+impl From<&Self> for Surface {
+    fn from(surface: &Self) -> Self {
+        *surface
+    }
+}
+
+/// Whether a body moving down by `dy` lands on a one-way surface: only if
+/// its base was on or above the top before the move.
+fn lands_on(body: &Body, dy: f32, solid: &Aabb) -> bool {
+    dy < 0.0 && body.pos.y - dy - body.half >= solid.max.y - OVERLAP_EPSILON
+}
+
 /// Advance `body` by `dt`, bouncing off `solids` with no energy loss.
 ///
-/// - Floor: bounce back up to the apex height; spin sets horizontal speed.
+/// - Floor: bounce back up to the apex height, scaled by the floor's
+///   `bounce`; spin sets horizontal speed.
 /// - Ceiling: reflect downwards, capping the bounce.
 /// - Wall: reverse horizontal speed (and spin, if tuned to).
+/// - One-way solids only act as floors, for a body coming down onto them.
 ///
 /// Large steps are split so a body never moves more than half its size per
 /// sub-step, preventing it tunnelling through thin solids.
-pub fn step(
+pub fn step<'a, S>(
     body: &mut Body,
     spin: &mut i8,
     tuning: &BounceTuning,
-    solids: &[Aabb],
+    solids: &'a [S],
     dt: f32,
-) -> Contacts {
+) -> Contacts
+where
+    &'a S: Into<Surface>,
+{
     let mut contacts = Contacts::default();
-    let max_speed = body.vel.abs().max_element().max(tuning.bounce_speed());
+    let top_bounce = solids
+        .iter()
+        .map(|s| s.into().traits.bounce)
+        .fold(1.0, f32::max)
+        .sqrt();
+    let max_speed = body
+        .vel
+        .abs()
+        .max_element()
+        .max(tuning.bounce_speed() * top_bounce);
     let (substeps, sub_dt) = substeps(body, max_speed, dt);
 
     for _ in 0..substeps {
@@ -157,15 +229,19 @@ pub fn step(
 ///
 /// Spin sets horizontal speed directly and `vertical` (-1, 0 or 1) moves the
 /// hero down or up at `hover_speed`. Floors and ceilings stop it; walls
-/// still reverse it (and its spin, if tuned to).
-pub fn hover_step(
+/// still reverse it (and its spin, if tuned to). It rises through one-way
+/// solids and stops on top of them.
+pub fn hover_step<'a, S>(
     body: &mut Body,
     spin: &mut i8,
     vertical: i8,
     tuning: &BounceTuning,
-    solids: &[Aabb],
+    solids: &'a [S],
     dt: f32,
-) -> Contacts {
+) -> Contacts
+where
+    &'a S: Into<Surface>,
+{
     let mut contacts = Contacts::default();
     body.vel = Vec2::new(
         tuning.horizontal_speed(*spin),
@@ -183,8 +259,12 @@ pub fn hover_step(
         if dy == 0.0 {
             continue;
         }
-        for solid in solids {
-            if !body.aabb().overlaps(solid) {
+        for surface in solids {
+            let surface: Surface = surface.into();
+            let solid = &surface.aabb;
+            if !body.aabb().overlaps(solid)
+                || (surface.traits.one_way && !lands_on(body, dy, solid))
+            {
                 continue;
             }
             if dy < 0.0 {
@@ -212,18 +292,24 @@ fn substeps(body: &Body, max_speed: f32, dt: f32) -> (u32, f32) {
     (substeps, sub_dt)
 }
 
-fn resolve_x(
+fn resolve_x<'a, S>(
     body: &mut Body,
     spin: &mut i8,
     tuning: &BounceTuning,
-    solids: &[Aabb],
+    solids: &'a [S],
     dx: f32,
     contacts: &mut Contacts,
-) {
+) where
+    &'a S: Into<Surface>,
+{
     if dx == 0.0 {
         return;
     }
-    for solid in solids {
+    for surface in solids.iter().map(Into::<Surface>::into) {
+        let solid = &surface.aabb;
+        if surface.traits.one_way {
+            continue;
+        }
         if !body.aabb().overlaps(solid) {
             continue;
         }
@@ -240,24 +326,27 @@ fn resolve_x(
     }
 }
 
-fn resolve_y(
+fn resolve_y<'a, S>(
     body: &mut Body,
     spin: i8,
     tuning: &BounceTuning,
-    solids: &[Aabb],
+    solids: &'a [S],
     dy: f32,
     contacts: &mut Contacts,
-) {
+) where
+    &'a S: Into<Surface>,
+{
     if dy == 0.0 {
         return;
     }
-    for solid in solids {
-        if !body.aabb().overlaps(solid) {
+    for surface in solids.iter().map(Into::<Surface>::into) {
+        let solid = &surface.aabb;
+        if !body.aabb().overlaps(solid) || (surface.traits.one_way && !lands_on(body, dy, solid)) {
             continue;
         }
         if dy < 0.0 {
             body.pos.y = solid.max.y + body.half;
-            body.vel.y = tuning.bounce_speed();
+            body.vel.y = tuning.bounce_speed() * surface.traits.bounce.max(0.0).sqrt();
             body.vel.x = tuning.horizontal_speed(spin);
             contacts.floor = true;
         } else {
@@ -283,6 +372,29 @@ pub fn ray_aabb(origin: Vec2, dir: Vec2, aabb: &Aabb) -> Option<f32> {
         return None;
     }
     Some(t_enter.max(0.0))
+}
+
+/// Where a ray enters `aabb` and the outward normal of the face it
+/// enters through, or `None` if it misses or starts inside. `dir` must be
+/// normalised.
+#[must_use]
+pub fn ray_aabb_face(origin: Vec2, dir: Vec2, aabb: &Aabb) -> Option<(f32, Vec2)> {
+    let inv = dir.recip();
+    let t1 = (aabb.min - origin) * inv;
+    let t2 = (aabb.max - origin) * inv;
+    let near = t1.min(t2);
+    let t_enter = near.max_element();
+    let t_exit = t1.max(t2).min_element();
+    if t_enter <= 0.0 || t_enter > t_exit {
+        return None;
+    }
+    // The face is on the axis the ray reached last, facing back at it.
+    let normal = if near.x >= near.y {
+        Vec2::new(-dir.x.signum(), 0.0)
+    } else {
+        Vec2::new(0.0, -dir.y.signum())
+    };
+    Some((t_enter, normal))
 }
 
 /// Distance along a ray to where it enters a circle, or `None` if it misses.
@@ -583,6 +695,96 @@ mod tests {
         assert!(contacts.wall);
         assert_eq!(spin, -3);
         assert!(body.pos.x <= wall.min.x - HALF);
+    }
+
+    fn one_way(aabb: Aabb) -> Surface {
+        Surface {
+            aabb,
+            traits: Traits {
+                one_way: true,
+                ..Traits::default()
+            },
+        }
+    }
+
+    /// Highest the body's base gets in `seconds`, bouncing off `solids`.
+    fn highest(body: &mut Body, solids: &[Surface], seconds: f32) -> f32 {
+        let (tuning, mut spin) = (BounceTuning::default(), 0);
+        let mut top = f32::MIN;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        for _ in 0..(seconds / DT) as usize {
+            step(body, &mut spin, &tuning, solids, DT);
+            top = top.max(body.pos.y - body.half);
+        }
+        top
+    }
+
+    #[test]
+    fn bodies_rise_through_one_way_solids_and_land_on_them() {
+        // A ledge 100 above the floor, inside the bounce's reach.
+        let ledge = Aabb::new(Vec2::new(-200.0, 100.0), Vec2::new(200.0, 110.0));
+        let mut body = resting_body();
+        let solids = [floor().into(), one_way(ledge)];
+        highest(&mut body, &solids, 1.5);
+        // It went up through the ledge and now bounces on top of it.
+        let lowest = (0..200)
+            .map(|_| {
+                step(&mut body, &mut 0, &BounceTuning::default(), &solids, DT);
+                body.pos.y - body.half
+            })
+            .fold(f32::MAX, f32::min);
+        assert!((lowest - 110.0).abs() < 1.0, "lowest base {lowest}");
+    }
+
+    #[test]
+    fn one_way_solids_are_not_walls_or_ceilings() {
+        let tuning = BounceTuning::default();
+        let block = Aabb::new(Vec2::new(30.0, -100.0), Vec2::new(60.0, 100.0));
+        let mut body = Body {
+            pos: Vec2::ZERO,
+            vel: Vec2::new(400.0, 0.0),
+            half: 24.0,
+        };
+        let mut spin = 3;
+        let contacts = hover_step(&mut body, &mut spin, 0, &tuning, &[one_way(block)], 0.5);
+        assert!(!contacts.wall && body.pos.x > 60.0);
+        // Hovering up passes through, and hovering down stops on top.
+        let block = Aabb::new(Vec2::new(-30.0, -100.0), Vec2::new(30.0, 100.0));
+        let mut body = resting_body();
+        body.pos.y = 50.0;
+        hover_step(&mut body, &mut 0, 1, &tuning, &[one_way(block)], 1.0);
+        assert!(body.pos.y > 300.0);
+        let contacts = hover_step(&mut body, &mut 0, -1, &tuning, &[one_way(block)], 2.0);
+        assert!(contacts.floor && (body.pos.y - body.half - 100.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn springs_raise_bounces_and_mud_lowers_them() {
+        let pad = |bounce| Surface {
+            aabb: floor(),
+            traits: Traits {
+                bounce,
+                ..Traits::default()
+            },
+        };
+        let apex = BounceTuning::default().apex_height;
+        let top = |bounce| highest(&mut resting_body(), &[pad(bounce)], 3.0) - floor().max.y;
+        assert!((top(1.0) - apex).abs() < apex * 0.02);
+        assert!((top(2.0) - apex * 2.0).abs() < apex * 0.04, "{}", top(2.0));
+        assert!((top(0.5) - apex * 0.5).abs() < apex * 0.02, "{}", top(0.5));
+    }
+
+    #[test]
+    fn rays_find_the_face_they_enter_by() {
+        let aabb = Aabb::new(Vec2::new(100.0, -10.0), Vec2::new(120.0, 10.0));
+        let (t, normal) = ray_aabb_face(Vec2::ZERO, Vec2::X, &aabb).unwrap();
+        assert!((t - 100.0).abs() < 1e-4);
+        assert_eq!(normal, Vec2::NEG_X);
+        let (_, normal) = ray_aabb_face(Vec2::new(110.0, 50.0), Vec2::NEG_Y, &aabb).unwrap();
+        assert_eq!(normal, Vec2::Y);
+        // From inside, or pointing away, there's no face to reflect off.
+        assert!(ray_aabb_face(Vec2::new(110.0, 0.0), Vec2::X, &aabb).is_none());
+        assert!(ray_aabb_face(Vec2::ZERO, Vec2::NEG_X, &aabb).is_none());
     }
 
     #[test]

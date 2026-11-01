@@ -8,7 +8,8 @@ use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 use crate::art::figures::{Animation, Sheet, stagger};
 use crate::art::sprites::Figure;
 use crate::beam::{
-    BeamColour, BeamEnergy, BeamLoadout, BeamTrace, BeamTuning, RayScene, trace_from_hero,
+    BeamColour, BeamEnergy, BeamLoadout, BeamTrace, BeamTuning, MAX_REFLECTIONS, RayScene,
+    trace_from_hero,
 };
 use crate::enemy::{
     BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, Orb, STARTING_LIVES,
@@ -17,7 +18,7 @@ use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{Checkpoint, RoomBounds, Solid};
 use crate::light::{Colour, Hidden, Primary};
-use crate::physics::BounceTuning;
+use crate::physics::{BounceTuning, Traits};
 use crate::powerup::{Abilities, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{Prism, PrismFrozen};
 use std::f32::consts::FRAC_PI_2;
@@ -330,9 +331,12 @@ pub struct BeamView {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BeamVisual(pub usize);
 
-/// Most pieces a trace can have: forward and rear beams, each fanned into
-/// three by spread, each split into white plus three colours by the prism.
-pub const MAX_BEAM_PIECES: usize = 2 * 3 * 4;
+/// Most pieces a trace can have.
+///
+/// Forward and rear beams, each fanned into three by spread, each split
+/// into white plus three colours by the prism, each of those reflecting
+/// off mirrors up to `MAX_REFLECTIONS` times.
+pub const MAX_BEAM_PIECES: usize = 2 * 3 * 4 * (1 + MAX_REFLECTIONS);
 
 /// One material per beam colour, shared by the pieces.
 #[derive(Resource, Debug)]
@@ -394,7 +398,7 @@ fn draw_beam(
     mut view: ResMut<BeamView>,
     heroes: Query<(&Transform, &Facing), (With<Hero>, Without<BeamVisual>)>,
     prisms: Query<&Transform, (With<Prism>, Without<Hero>, Without<BeamVisual>)>,
-    solids: Query<&Solid>,
+    solids: Query<(&Solid, Option<&Traits>)>,
     enemies: Query<(&Position, &Enemy)>,
     mut visuals: Query<
         (
@@ -411,10 +415,10 @@ fn draw_beam(
     };
     let trace = match heroes.single() {
         Ok((hero, facing)) if energy.firing => {
-            let scene = RayScene {
-                solids: solids.iter().map(|s| s.0).collect(),
-                targets: enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
-            };
+            let scene = RayScene::new(
+                solids,
+                enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
+            );
             let prism = prisms.single().ok().map(|p| p.translation.truncate());
             trace_from_hero(
                 hero.translation.truncate(),

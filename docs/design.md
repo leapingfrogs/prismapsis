@@ -228,6 +228,8 @@ reads well in a terminal or text editor and is easy to generate.
   common cases, so many levels need no legend at all:
   - `#` is a grey wall, and `R G B Y C M W` are walls of that hue.
   - `r g b y c m w` are phantom platforms of that hue.
+  - `=` is a one-way platform, `^` a spring pad, `~` mud and `%` a mirror
+    block, all grey; see "Tile kinds".
   - `@` is the start, `X` the exit, `K` a checkpoint, and `.` or a space
     is empty.
 
@@ -257,9 +259,19 @@ reads well in a terminal or text editor and is easy to generate.
 - **Crumbling:** gives way after being landed on a set number of times.
 - **Breakable:** only the matching split beam colour breaks it, so a red
   block needs the red beam.
-- **Traits** set in the legend:
-  - bounce modifiers: a spring pad or mud, with a strength multiplier.
-  - mirror: every surface reflects the beam by its angle of incidence.
+- **Traits** set in the legend, on walls and phantoms. They combine, so a
+  one-way phantom platform or a springy mirror is one legend entry:
+  - `one_way = true`: only its top is solid. The hero rises through it,
+    passes it sideways and lands on it from above. Hovering with
+    anti-gravity also rises through it and rests on top.
+  - `bounce = <multiplier>`: scales the height of bounces off its top,
+    from 0.25 to 3. Above 1 is a spring pad (the default `^` is 1.6), below
+    1 is mud (the default `~` is 0.5).
+  - `mirror = true`: every face reflects the beam by its angle of
+    incidence, up to four times per beam. Split colour beams reflect too,
+    and a reflected white beam still splits at the prism.
+- The default `=` is 10 units thick and `^` 20, with their tops on the
+  tile's top; `~` and `%` fill the tile.
 
 ### Level tooling
 
@@ -301,8 +313,8 @@ output is committed; the game only ever loads level files.
   pickups and decoration each draw from their own stream, so changing how
   one is made leaves the others as they were.
 - **`assets/levels/campaign.toml`** lists the levels in play order. The
-  test room and the tower are dev levels and test fixtures, played with
-  `--level`.
+  test room, the tower and the workshop (every tile kind in one room) are
+  dev levels and test fixtures, played with `--level`.
 - **Wide levels** run over ground built from short patterns that give it
   rhythm: flat stretches, stairs, hops between pillars, pits that widen,
   and alternating steps, none stepping more than two tiles. Each gate is a
@@ -323,15 +335,21 @@ output is committed; the game only ever loads level files.
   together with which primaries are restored, since restoring a colour makes
   its phantoms solid. A primary counts as restorable when the level's waves
   include it, or when enough lens light is in the beam's reach. Picking up
-  anti-gravity lets the hero hover anywhere open. The level is solvable if
+  anti-gravity lets the hero hover anywhere open. One-way platforms and
+  springs and mud need no rules of their own, as the physics handles them;
+  each landing launches the next bounce at its surface's speed, and
+  hovering can't move down into a one-way platform from above. Mirrors
+  count as ordinary walls for the beam, so the reach of lenses is never
+  overstated. The level is solvable if
   the exit can be touched with white restored. `just level-check` runs it
   on every level, hand-made ones included, and says whether each is
   comfortable.
 - **First campaign:** eight levels, six wide and two tall.
 - **Later:** branches and parallel routes (optional side paths to pickups,
   two ways past a gate), hand-drawn set pieces spliced into the route, and
-  the 6b tile kinds; each tile kind brings its own reach rule to the checker
-  and its own placement to the generator.
+  placing the 6b tile kinds in generated levels; the checker already
+  handles one-way platforms, springs and mud, and moving, crumbling and
+  breakable platforms will each bring a reach rule of their own.
 - **Background reading:** Compton and Mateas, "Procedural Level Design for
   Platform Games" (AAAI, 2006), for rhythm patterns and measuring jump
   difficulty from the physics; Fisher, "How to make insane procedural
@@ -372,9 +390,20 @@ output is committed; the game only ever loads level files.
   drawn, rather than rotating a few, because light comes from above: tops
   are lit and undersides shaded. Solid interiors get a few variants, picked
   by a hash of the position, so long walls don't visibly repeat.
-- **Each tile kind is its own set of 16**, in its own tileset, so each 6b
-  tile kind adds a set when it's built. Collision is unchanged: tiles only
-  draw the cells the level already has.
+- **Each tile kind is its own set of 16**, so each 6b tile kind adds a set
+  when it's built. Collision is unchanged: tiles only draw the cells the
+  level already has.
+- **Features** (walls with traits) are drawn from a third tileset per
+  theme, one quad per cell rather than on the dual grid, as platforms and
+  pads are thinner than a cell. Each quad covers the part of its cell the
+  feature fills, from the top down, and its tile depends on which of its
+  four neighbours hold the same feature, so runs join and their ends are
+  finished. One-way platforms are slim ledges of the theme's stone with
+  faint chevrons pointing up; spring pads are a lit plate on coils;
+  mud is a mottled sludge with a wet, bubbling top; and mirrors are
+  silvered glass with bright streaks, framed in the theme's stone. A wall
+  with traits draws only as its feature, and `just art preview` shows each
+  one in its sample room.
 - **Scenery is drawn as panels set back behind the walls**, on the same dual
   grid with a set of its own: a stone frame round leaded glass, with a rose
   window, a lit pane or broken panes in the solid variants. The glass is
@@ -491,7 +520,8 @@ output is committed; the game only ever loads level files.
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |
-| 6b | Tile kinds | One-way, moving, crumbling and colour-breakable platforms; spring and mud bounce modifiers; mirror walls reflecting the beam. |
+| 6b-1 | Static tile kinds | One-way platforms, spring and mud bounce modifiers and mirror walls reflecting the beam, as legend traits on walls and phantoms; the checker handles them; feature art per theme; the workshop dev level. |
+| 6b-2 | Changing tile kinds | Moving, crumbling and colour-breakable platforms, each with a reach rule for the checker. |
 | 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
 | 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |

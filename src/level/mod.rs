@@ -22,7 +22,7 @@ use crate::hero::{
     Facing, HERO_RADIUS, Hero, Position, PreviousPosition, Spin, Velocity, move_hero,
 };
 use crate::light::{ExitGate, Hidden, LevelsCompleted, LightTuning, Phantom, Shade, reach_exit};
-use crate::physics::Aabb;
+use crate::physics::{Aabb, Traits};
 use crate::powerup::{Placed, pickup_bundle};
 
 /// Height of the view in world units, whatever the window size.
@@ -300,14 +300,21 @@ impl Plugin for LevelPlugin {
 /// set the room's bounds.
 pub fn spawn_geometry(commands: &mut Commands, level: &Level) {
     commands.insert_resource(RoomBounds(Aabb::new(Vec2::ZERO, level.size)));
-    for &(aabb, hue) in &level.walls {
+    for &(aabb, hue, traits) in &level.walls {
         let mut wall = commands.spawn((Name::new("Wall"), LevelGeometry, Solid(aabb)));
         if let Some(hue) = hue {
             wall.insert(Shade(hue));
         }
+        if traits != Traits::default() {
+            wall.insert(traits);
+        }
     }
-    for &(aabb, hue) in &level.phantoms {
-        commands.spawn((Name::new("Phantom"), LevelGeometry, Phantom { hue, aabb }));
+    for &(aabb, hue, traits) in &level.phantoms {
+        let mut phantom =
+            commands.spawn((Name::new("Phantom"), LevelGeometry, Phantom { hue, aabb }));
+        if traits != Traits::default() {
+            phantom.insert(traits);
+        }
     }
     for &(aabb, hue) in &level.scenery {
         let mut scenery = commands.spawn((Name::new("Scenery"), LevelGeometry, Scenery(aabb)));
@@ -561,7 +568,7 @@ mod tests {
             .map(|p| format!("{:?}", p.1))
             .collect();
         assert_eq!(hues.len(), 6, "one phantom per hue except white");
-        for (phantom, _) in &level.phantoms {
+        for (phantom, _, _) in &level.phantoms {
             assert!(walls.iter().all(|w| !w.overlaps(phantom)));
         }
         for (center, _) in &level.lenses {

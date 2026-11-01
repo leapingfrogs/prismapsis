@@ -11,7 +11,7 @@ use crate::enemy::{Enemy, HIT_FLASH};
 use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Position, update_facing};
 use crate::level::Solid;
-use crate::physics::{Aabb, ray_aabb, ray_circle};
+use crate::physics::{Aabb, Traits, ray_aabb, ray_aabb_face, ray_circle};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
@@ -124,12 +124,35 @@ pub enum BeamColour {
     Blue,
 }
 
+/// Times a beam can reflect off mirrors before it stops.
+pub const MAX_REFLECTIONS: usize = 4;
+
 /// Things a beam can hit.
 #[derive(Debug, Default)]
 pub struct RayScene {
     pub solids: Vec<Aabb>,
+    /// Solids whose faces reflect the beam.
+    pub mirrors: Vec<Aabb>,
     /// Target centres and radii.
     pub targets: Vec<(Vec2, f32)>,
+}
+
+impl RayScene {
+    /// The scene made by the level's solids, sorting mirrors from the rest,
+    /// with `targets` to hit.
+    pub fn new<'a>(
+        solids: impl IntoIterator<Item = (&'a Solid, Option<&'a Traits>)>,
+        targets: Vec<(Vec2, f32)>,
+    ) -> Self {
+        let (mirrors, solids): (Vec<_>, Vec<_>) = solids
+            .into_iter()
+            .partition(|(_, traits)| traits.is_some_and(|t| t.mirror));
+        Self {
+            solids: solids.into_iter().map(|(s, _)| s.0).collect(),
+            mirrors: mirrors.into_iter().map(|(s, _)| s.0).collect(),
+            targets,
+        }
+    }
 }
 
 /// One straight piece of a traced beam.
@@ -147,6 +170,8 @@ pub struct BeamTrace {
 enum Hit {
     Nothing,
     Solid,
+    /// A mirror face, facing this way.
+    Mirror(Vec2),
     Target(usize),
     Prism,
 }
@@ -171,6 +196,11 @@ fn cast(
     for solid in &scene.solids {
         consider(ray_aabb(origin, dir, solid), Hit::Solid);
     }
+    for mirror in &scene.mirrors {
+        if let Some((t, normal)) = ray_aabb_face(origin, dir, mirror) {
+            consider(Some(t), Hit::Mirror(normal));
+        }
+    }
     if let Some(center) = prism {
         consider(ray_circle(origin, dir, center, PRISM_RADIUS), Hit::Prism);
     }
@@ -194,12 +224,44 @@ fn cast(
     best
 }
 
+/// How far off a mirror a reflected beam starts, so it doesn't hit the
+/// face it left.
+const MIRROR_GAP: f32 = 0.01;
+
+/// Follow one beam of `colour` from `origin` along `dir`, reflecting off
+/// mirrors up to `MAX_REFLECTIONS` times and adding each piece to `trace`.
+/// Returns what stopped it, and where its last piece started.
+fn follow(
+    trace: &mut BeamTrace,
+    mut origin: Vec2,
+    mut dir: Vec2,
+    colour: BeamColour,
+    prism: Option<Vec2>,
+    scene: &RayScene,
+    piercing: bool,
+) -> (Hit, Vec2) {
+    for reflections in 0..=MAX_REFLECTIONS {
+        let (t, hit) = cast(origin, dir, scene, prism, piercing, &mut trace.hit_targets);
+        let end = origin + dir * t;
+        trace.segments.push((origin, end, colour));
+        match hit {
+            Hit::Mirror(normal) if reflections < MAX_REFLECTIONS => {
+                dir -= 2.0 * dir.dot(normal) * normal;
+                origin = end + normal * MIRROR_GAP;
+            }
+            _ => return (hit, origin),
+        }
+    }
+    (Hit::Nothing, origin)
+}
+
 /// Trace the beam fired from `origin` along `dir` (normalised).
 ///
-/// If it crosses the prism at `prism`, the white beam ends there and three
-/// coloured beams fan out from the prism's far side, centred on the
-/// direction from `hero` to the prism. Split beams don't re-enter the prism.
-/// Targets stop each beam unless `piercing`.
+/// Mirrors reflect it. If it crosses the prism at `prism`, the white beam
+/// ends there and three coloured beams fan out from the prism's far side,
+/// centred on the direction from `hero` (or the last mirror) to the prism.
+/// Split beams don't re-enter the prism. Targets stop each beam unless
+/// `piercing`.
 #[must_use]
 pub fn trace_beam(
     origin: Vec2,
@@ -211,14 +273,20 @@ pub fn trace_beam(
     piercing: bool,
 ) -> BeamTrace {
     let mut trace = BeamTrace::default();
-    let (t, hit) = cast(origin, dir, scene, prism, piercing, &mut trace.hit_targets);
-    trace
-        .segments
-        .push((origin, origin + dir * t, BeamColour::White));
+    let (hit, last) = follow(
+        &mut trace,
+        origin,
+        dir,
+        BeamColour::White,
+        prism,
+        scene,
+        piercing,
+    );
     let (Hit::Prism, Some(center)) = (hit, prism) else {
         return trace;
     };
-    let outward = (center - hero).normalize_or(dir);
+    let source = if last == origin { hero } else { last };
+    let outward = (center - source).normalize_or(dir);
     let spread = split_angle.to_radians();
     for (angle, colour) in [
         (spread, BeamColour::Red),
@@ -227,15 +295,7 @@ pub fn trace_beam(
     ] {
         let split_dir = Vec2::from_angle(angle).rotate(outward);
         let start = center + split_dir * PRISM_RADIUS;
-        let (t, _) = cast(
-            start,
-            split_dir,
-            scene,
-            None,
-            piercing,
-            &mut trace.hit_targets,
-        );
-        trace.segments.push((start, start + split_dir * t, colour));
+        follow(&mut trace, start, split_dir, colour, None, scene, piercing);
     }
     trace
 }
@@ -414,7 +474,7 @@ pub fn damage_enemies(
     mut timer: ResMut<DamageTimer>,
     heroes: Query<(&Position, &Facing), With<Hero>>,
     prisms: Query<&Position, With<Prism>>,
-    solids: Query<&Solid>,
+    solids: Query<(&Solid, Option<&Traits>)>,
     mut enemies: Query<(&Position, &mut Enemy)>,
 ) {
     if !energy.firing {
@@ -434,10 +494,10 @@ pub fn damage_enemies(
     if ticks == 0 {
         return;
     }
-    let scene = RayScene {
-        solids: solids.iter().map(|s| s.0).collect(),
-        targets: enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
-    };
+    let scene = RayScene::new(
+        solids,
+        enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
+    );
     let prism = prisms.single().ok().map(|p| p.0);
     let loadout = BeamLoadout::from_abilities(*abilities, &powerups);
     let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle, &loadout);
@@ -470,6 +530,7 @@ mod tests {
     #[test]
     fn beam_stops_at_the_first_wall() {
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![wall_at(500.0), wall_at(300.0)],
             targets: vec![],
         };
@@ -485,6 +546,7 @@ mod tests {
     #[test]
     fn beam_hits_target_in_front_of_wall() {
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![wall_at(500.0)],
             targets: vec![
                 (Vec2::new(200.0, 0.0), 20.0),
@@ -494,6 +556,78 @@ mod tests {
         let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
         assert_eq!(trace.hit_targets, vec![0]);
         assert!((trace.segments[0].1.x - 180.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn mirrors_reflect_the_beam_by_its_angle() {
+        // A mirror floor below a beam heading down and right: it comes back
+        // up at the same angle and hits the target above.
+        let floor = Aabb::new(Vec2::new(-1000.0, -200.0), Vec2::new(1000.0, -100.0));
+        let scene = RayScene {
+            mirrors: vec![floor],
+            solids: vec![wall_at(600.0)],
+            targets: vec![(Vec2::new(200.0, 0.0), 10.0)],
+        };
+        let dir = Vec2::new(1.0, -1.0).normalize();
+        let trace = trace_beam(Vec2::ZERO, dir, Vec2::ZERO, None, &scene, SPLIT, false);
+        assert_eq!(trace.segments.len(), 2);
+        let bounce = trace.segments[0].1;
+        assert!(
+            (bounce - Vec2::new(100.0, -100.0)).length() < 0.1,
+            "{bounce}"
+        );
+        let out = (trace.segments[1].1 - trace.segments[1].0).normalize();
+        assert!((out - Vec2::new(1.0, 1.0).normalize()).length() < 1e-3);
+        assert_eq!(trace.hit_targets, vec![0]);
+    }
+
+    #[test]
+    fn beams_reflect_a_limited_number_of_times() {
+        // Two facing mirrors catch the beam between them.
+        let left = Aabb::new(Vec2::new(-200.0, -500.0), Vec2::new(-100.0, 500.0));
+        let right = Aabb::new(Vec2::new(100.0, -500.0), Vec2::new(200.0, 500.0));
+        let scene = RayScene {
+            mirrors: vec![left, right],
+            solids: vec![],
+            targets: vec![],
+        };
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
+        assert_eq!(trace.segments.len(), 1 + MAX_REFLECTIONS);
+    }
+
+    #[test]
+    fn split_beams_reflect_too() {
+        let prism = Vec2::new(90.0, 0.0);
+        let scene = RayScene {
+            mirrors: vec![wall_at(400.0)],
+            solids: vec![],
+            targets: vec![],
+        };
+        let trace = trace_beam(
+            Vec2::new(24.0, 0.0),
+            Vec2::X,
+            Vec2::ZERO,
+            Some(prism),
+            &scene,
+            SPLIT,
+            false,
+        );
+        for colour in [BeamColour::Red, BeamColour::Green, BeamColour::Blue] {
+            let pieces = trace.segments.iter().filter(|s| s.2 == colour).count();
+            assert!(pieces >= 2, "{colour:?} has {pieces} pieces");
+        }
+    }
+
+    #[test]
+    fn scenes_sort_mirrors_from_other_solids() {
+        let (plain, mirror) = (Solid(wall_at(0.0)), Solid(wall_at(100.0)));
+        let traits = Traits {
+            mirror: true,
+            ..Traits::default()
+        };
+        let scene = RayScene::new([(&plain, None), (&mirror, Some(&traits))], vec![]);
+        assert_eq!(scene.solids, vec![wall_at(0.0)]);
+        assert_eq!(scene.mirrors, vec![wall_at(100.0)]);
     }
 
     #[test]
@@ -514,6 +648,7 @@ mod tests {
     fn prism_in_the_line_of_fire_splits_into_three_colours() {
         let prism = Vec2::new(90.0, 0.0);
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![wall_at(1000.0)],
             targets: vec![],
         };
@@ -570,6 +705,7 @@ mod tests {
         let prism = Vec2::new(90.0, 0.0);
         let up = Vec2::from_angle(SPLIT.to_radians());
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![],
             targets: vec![(prism + up * 300.0, 20.0)],
         };
@@ -616,6 +752,7 @@ mod tests {
     #[test]
     fn piercing_beams_hit_every_target_up_to_the_wall() {
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![wall_at(500.0)],
             targets: vec![
                 (Vec2::new(200.0, 0.0), 20.0),
@@ -669,6 +806,7 @@ mod tests {
     #[test]
     fn rear_shot_hits_targets_behind_and_each_target_counts_once() {
         let scene = RayScene {
+            mirrors: Vec::new(),
             solids: vec![],
             targets: vec![
                 (Vec2::new(-300.0, 0.0), 20.0),

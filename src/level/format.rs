@@ -14,7 +14,7 @@ use serde::Deserialize;
 use crate::enemy::EnemyTuning;
 use crate::hero::HERO_RADIUS;
 use crate::light::{Hue, LightTuning, Primary};
-use crate::physics::Aabb;
+use crate::physics::{Aabb, Traits};
 use crate::powerup::PowerUp;
 
 use super::generate::Recipe;
@@ -70,11 +70,13 @@ pub enum Tile {
     Wall {
         hue: Option<Hue>,
         height: Option<f32>,
+        traits: Traits,
     },
     /// Solid once its hue is restored.
     Phantom {
         hue: Hue,
         height: Option<f32>,
+        traits: Traits,
     },
     /// Background decoration with no collision.
     Scenery(Option<Hue>),
@@ -89,6 +91,28 @@ pub enum Tile {
     Checkpoint,
 }
 
+/// Height of the default one-way platform, `=`.
+pub const PLATFORM_HEIGHT: f32 = 10.0;
+
+/// Height of the default spring pad, `^`.
+pub const PAD_HEIGHT: f32 = 20.0;
+
+/// How much the default spring, `^`, and mud, `~`, scale a bounce's height.
+pub const SPRING: f32 = 1.6;
+pub const MUD: f32 = 0.5;
+
+/// The range a legend's `bounce` can take.
+pub const BOUNCE_RANGE: std::ops::RangeInclusive<f32> = 0.25..=3.0;
+
+/// A grey wall with traits.
+const fn feature(height: Option<f32>, traits: Traits) -> Tile {
+    Tile::Wall {
+        hue: None,
+        height,
+        traits,
+    }
+}
+
 /// The legend every level starts from; a level's own legend adds to or
 /// overrides it.
 #[must_use]
@@ -101,7 +125,48 @@ pub fn default_legend() -> BTreeMap<char, Tile> {
             Tile::Wall {
                 hue: None,
                 height: None,
+                traits: Traits::default(),
             },
+        ),
+        (
+            '=',
+            feature(
+                Some(PLATFORM_HEIGHT),
+                Traits {
+                    one_way: true,
+                    ..Traits::default()
+                },
+            ),
+        ),
+        (
+            '^',
+            feature(
+                Some(PAD_HEIGHT),
+                Traits {
+                    bounce: SPRING,
+                    ..Traits::default()
+                },
+            ),
+        ),
+        (
+            '~',
+            feature(
+                None,
+                Traits {
+                    bounce: MUD,
+                    ..Traits::default()
+                },
+            ),
+        ),
+        (
+            '%',
+            feature(
+                None,
+                Traits {
+                    mirror: true,
+                    ..Traits::default()
+                },
+            ),
         ),
         ('@', Tile::Start),
         ('X', Tile::Exit),
@@ -120,8 +185,13 @@ pub fn default_legend() -> BTreeMap<char, Tile> {
         let wall = Tile::Wall {
             hue: Some(hue),
             height: None,
+            traits: Traits::default(),
         };
-        let phantom = Tile::Phantom { hue, height: None };
+        let phantom = Tile::Phantom {
+            hue,
+            height: None,
+            traits: Traits::default(),
+        };
         legend.insert(ch, wall);
         legend.insert(ch.to_ascii_lowercase(), phantom);
     }
@@ -258,8 +328,8 @@ pub struct Level {
     pub tile: f32,
     pub size: Vec2,
     pub start: Vec2,
-    pub walls: Vec<(Aabb, Option<Hue>)>,
-    pub phantoms: Vec<(Aabb, Hue)>,
+    pub walls: Vec<(Aabb, Option<Hue>, Traits)>,
+    pub phantoms: Vec<(Aabb, Hue, Traits)>,
     pub scenery: Vec<(Aabb, Option<Hue>)>,
     pub exits: Vec<Aabb>,
     pub checkpoints: Vec<Aabb>,
@@ -404,6 +474,9 @@ struct TileFile {
     pickup: Option<PowerUp>,
     hidden: Option<Tint>,
     height: Option<f32>,
+    one_way: Option<bool>,
+    bounce: Option<f32>,
+    mirror: Option<bool>,
 }
 
 /// Turn one legend entry into a tile.
@@ -441,6 +514,24 @@ fn legend_tile(value: toml::Value, tile_size: f32) -> Result<Tile, String> {
             "height must be above 0 and at most the tile size ({tile_size})"
         ));
     }
+    let has_traits = spec.one_way.is_some() || spec.bounce.is_some() || spec.mirror.is_some();
+    if has_traits && spec.wall.is_none() && spec.phantom.is_none() {
+        return Err("only walls and phantoms have one_way, bounce or mirror".to_owned());
+    }
+    if let Some(bounce) = spec.bounce
+        && !BOUNCE_RANGE.contains(&bounce)
+    {
+        return Err(format!(
+            "bounce must be from {} to {}, not {bounce}",
+            BOUNCE_RANGE.start(),
+            BOUNCE_RANGE.end()
+        ));
+    }
+    let traits = Traits {
+        one_way: spec.one_way.unwrap_or(false),
+        bounce: spec.bounce.unwrap_or(1.0),
+        mirror: spec.mirror.unwrap_or(false),
+    };
     let coloured = |tint: Tint| {
         tint.hue()
             .ok_or_else(|| "needs a colour, not grey".to_owned())
@@ -449,11 +540,13 @@ fn legend_tile(value: toml::Value, tile_size: f32) -> Result<Tile, String> {
         Tile::Wall {
             hue: tint.hue(),
             height: spec.height,
+            traits,
         }
     } else if let Some(tint) = spec.phantom {
         Tile::Phantom {
             hue: coloured(tint)?,
             height: spec.height,
+            traits,
         }
     } else if let Some(tint) = spec.scenery {
         Tile::Scenery(tint.hue())
@@ -637,8 +730,8 @@ fn place(
 /// Areas covered by runs of the same character, merged into rectangles.
 #[derive(Default)]
 struct Areas {
-    walls: Vec<(Aabb, Option<Hue>)>,
-    phantoms: Vec<(Aabb, Hue)>,
+    walls: Vec<(Aabb, Option<Hue>, Traits)>,
+    phantoms: Vec<(Aabb, Hue, Traits)>,
     scenery: Vec<(Aabb, Option<Hue>)>,
     exits: Vec<Aabb>,
     checkpoints: Vec<Aabb>,
@@ -664,8 +757,12 @@ fn merge_areas(
                 .map(|r| layout.aabb(r, height))
         };
         match entry {
-            Tile::Wall { hue, .. } => areas.walls.extend(rects().map(|a| (a, hue))),
-            Tile::Phantom { hue, .. } => areas.phantoms.extend(rects().map(|a| (a, hue))),
+            Tile::Wall { hue, traits, .. } => {
+                areas.walls.extend(rects().map(|a| (a, hue, traits)));
+            }
+            Tile::Phantom { hue, traits, .. } => {
+                areas.phantoms.extend(rects().map(|a| (a, hue, traits)));
+            }
             Tile::Scenery(hue) => areas.scenery.extend(rects().map(|a| (a, hue))),
             Tile::Exit => areas.exits.extend(rects()),
             Tile::Checkpoint => areas.checkpoints.extend(rects()),
@@ -816,14 +913,14 @@ mod tests {
         );
         // Top row, then the two side walls, then the bottom row.
         assert_eq!(level.walls.len(), 4);
-        assert!(level.walls.iter().all(|(_, hue)| hue.is_none()));
+        assert!(level.walls.iter().all(|(_, hue, _)| hue.is_none()));
         assert_eq!(level.waves, Waves::default());
     }
 
     #[test]
     fn default_legend_colours_walls_and_phantoms() {
         let level = level("RRRRRR\nR@ g X\nRRRRRR\n", "").unwrap();
-        assert!(level.walls.iter().all(|(_, hue)| *hue == Some(Hue::Red)));
+        assert!(level.walls.iter().all(|(_, hue, _)| *hue == Some(Hue::Red)));
         assert_eq!(level.phantoms.len(), 1);
         assert_eq!(level.phantoms[0].1, Hue::Green);
     }
@@ -860,7 +957,7 @@ gauge_capacity = 5
         let thin = level
             .walls
             .iter()
-            .find(|(_, hue)| *hue == Some(Hue::Yellow))
+            .find(|(_, hue, _)| *hue == Some(Hue::Yellow))
             .unwrap()
             .0;
         assert_eq!(
@@ -930,6 +1027,43 @@ gauge_capacity = 5
     }
 
     #[test]
+    fn walls_and_phantoms_carry_traits() {
+        let map = "\
+########
+#@ =^~%#
+# s    #
+#     X#
+########
+";
+        let extra = r#"[legend]
+"s" = { phantom = "red", one_way = true, bounce = 2, height = 8 }
+"#;
+        let level = level(map, extra).unwrap();
+        // The second row from the top, whose cells start 160 up.
+        let traits = |col: f32| {
+            level
+                .walls
+                .iter()
+                .find(|(aabb, _, _)| {
+                    (aabb.min.x - col * 40.0).abs() < 1e-3 && (aabb.max.y - 160.0).abs() < 1e-3
+                })
+                .unwrap()
+                .2
+        };
+        assert!(traits(3.0).one_way && !traits(3.0).mirror);
+        assert!((traits(4.0).bounce - SPRING).abs() < f32::EPSILON);
+        assert!((traits(5.0).bounce - MUD).abs() < f32::EPSILON);
+        assert!(traits(6.0).mirror);
+        assert_eq!(traits(0.0), Traits::default(), "plain walls have none");
+        // The platform is slim, keeping its top on the row's top.
+        let platform = level.walls.iter().find(|w| w.2.one_way).unwrap().0;
+        assert!((platform.size().y - PLATFORM_HEIGHT).abs() < f32::EPSILON);
+        let (_, hue, phantom) = level.phantoms[0];
+        assert_eq!(hue, Hue::Red);
+        assert!(phantom.one_way && (phantom.bounce - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn legend_and_setting_problems_are_reported() {
         let extra = r#"tile = -1
 [legend]
@@ -941,6 +1075,8 @@ gauge_capacity = 5
 "t" = { wall = "red", height = 50 }
 "g" = { phantom = "grey" }
 "m" = "nowhere"
+"s" = { scenery = "red", mirror = true }
+"b" = { wall = "grey", bounce = 9 }
 [waves]
 colours = ["cyan"]
 interval = 0
@@ -959,6 +1095,8 @@ mote_light = -1
             "legend 't': height must be above 0",
             "legend 'g': needs a colour, not grey",
             "legend 'm': unknown variant",
+            "legend 's': only walls and phantoms have one_way, bounce or mirror",
+            "legend 'b': bounce must be from 0.25 to 3",
             "waves: wave colours must be red, green or blue",
             "waves: interval must be positive",
             "waves: size must be at least 1",

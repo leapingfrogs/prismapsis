@@ -1,7 +1,7 @@
 //! Generated art tools.
 //!
-//! - `art` paints every theme's tilesets and the sprite sheet into
-//!   `assets/art`.
+//! - `art` paints every theme's tilesets (walls, panels and features) and
+//!   the sprite sheet into `assets/art`.
 //! - `art --check` changes nothing and fails if a committed image is out of
 //!   date.
 //! - `art preview DIR` writes a sample of each theme to DIR, drawn
@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use bevy::color::{Color, ColorToComponents};
+use prismapsis::art::features;
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
 use prismapsis::enemy::EnemyKind;
@@ -20,16 +21,17 @@ use prismapsis::powerup::PowerUp;
 use prismapsis::render::{coloured_enemy, power_up_colour};
 
 /// The sample room drawn by `preview`: ledges, a pillar, an overhang and
-/// a pit, so every kind of edge and corner shows, and scenery panels
-/// of several shapes and hues, one against a wall.
+/// a pit, so every kind of edge and corner shows; scenery panels of
+/// several shapes and hues, one against a wall; and each feature: a
+/// one-way platform, spring pads, mud in the pit and a mirror block.
 const SAMPLE: [&str; 8] = [
     "##############",
     "# rr      yyy#",
     "# rr###   ooo#",
     "# rr###   ## #",
-    "#     #  b   #",
-    "##       b#  #",
-    "###  ##   ####",
+    "# === #  b %%#",
+    "##       b#%%#",
+    "###~~##^^ ####",
     "##############",
 ];
 
@@ -73,7 +75,10 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
                 paint::tileset(&theme, kind),
             )
         });
-    let images = tilesets.chain(std::iter::once((
+    let features = paint::themes()
+        .into_iter()
+        .map(|theme| (features::tileset_path(&theme), features::tileset(&theme)));
+    let images = tilesets.chain(features).chain(std::iter::once((
         sprites::SHEET_PATH.to_owned(),
         sprites::sheet(),
     )));
