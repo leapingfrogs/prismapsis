@@ -18,6 +18,9 @@ bevy = { version = "0.20.1", features = ["wav"] }
 bevy_egui = { version = "0.43.1", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
+# `noise` and `png` paint and write the generated art (`just art`).
+noise = "0.9.0"
+png = "0.18.1"
 
 [build-dependencies]
 toml = "1.1.8"
