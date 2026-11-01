@@ -294,8 +294,8 @@ output is committed; the game only ever loads level files.
 
 - **Seeded and reproducible.** A generated level file keeps the settings it
   was made from in a `[generated]` table: seed, shape (`wide` or `tall`),
-  gate colours, lenses per gate and wave interval. To add a level, write a
-  file with just its `name` and `[generated]` table, then run
+  gate colours, lenses per gate, tile features and wave interval. To add a
+  level, write a file with just its `name` and `[generated]` table, then run
   `just levelgen`, which fills in the rest. Generated files are never edited
   by hand: change the settings and regenerate instead.
 - **Every layout is checked before it's written.** It must be finishable
@@ -310,8 +310,8 @@ output is committed; the game only ever loads level files.
   Layout is deterministic, so a matching file is the level that passed its
   checks.
 - **Separate random numbers per stage.** Layout, terrain, ledges, lenses,
-  pickups and decoration each draw from their own stream, so changing how
-  one is made leaves the others as they were.
+  pickups, decoration and features each draw from their own stream, so
+  changing how one is made leaves the others as they were.
 - **`assets/levels/campaign.toml`** lists the levels in play order. The
   test room, the tower and the workshop (every tile kind in one room) are
   dev levels and test fixtures, played with `--level`.
@@ -322,6 +322,22 @@ output is committed; the game only ever loads level files.
   that colour before it.
 - **Tall levels** climb platforms on alternating sides, five tiles apart.
   Each gate is a phantom platform the climb can't skip.
+- **Tile features** are opt-in: a recipe's `features` lists any of
+  `platforms`, `springs`, `mud` and `mirrors`, and a layout without each
+  one asked for is thrown away like an unsound one. They draw from their
+  own random stream, and only plain walls change, so a recipe without
+  features lays out exactly as before.
+  - Wide levels: plain ledges become one-way platforms or mirrors; mud
+    floors some pits and patches of flat ground; pillars become mirrors; a
+    spring pad sits on a flat stretch of each segment. The start,
+    checkpoints and gate approaches keep plain ground, and springs stay
+    well clear of gates.
+  - Tall levels: plain platforms become one-way platforms or mirrors; a
+    spring pad sits at the wall end of some platforms, never within two
+    platforms of a gate, so a spring can't skip one; mirror patches line
+    the side walls. Tall levels have no mud, which would stall the climb.
+  - The campaign introduces them in turn: platforms from level 2, springs
+    from 3, mud from 4, mirrors from 5, and all four in the last two.
 - **Difficulty rises** with more colour gates, more enemy pressure (shorter
   wave intervals, more lenses) and longer levels. Jumps stay comfortable.
 - **Colours return primaries first.** Early levels gate on red, green and
@@ -347,9 +363,8 @@ output is committed; the game only ever loads level files.
 - **First campaign:** eight levels, six wide and two tall.
 - **Later:** branches and parallel routes (optional side paths to pickups,
   two ways past a gate), hand-drawn set pieces spliced into the route, and
-  placing the 6b tile kinds in generated levels; the checker already
-  handles one-way platforms, springs and mud, and moving, crumbling and
-  breakable platforms will each bring a reach rule of their own.
+  placing the changing tile kinds (6b-2) once they exist; moving, crumbling
+  and breakable platforms will each bring a reach rule of their own.
 - **Background reading:** Compton and Mateas, "Procedural Level Design for
   Platform Games" (AAAI, 2006), for rhythm patterns and measuring jump
   difficulty from the physics; Fisher, "How to make insane procedural
@@ -524,6 +539,7 @@ output is committed; the game only ever loads level files.
 | 6b-2 | Changing tile kinds | Moving, crumbling and colour-breakable platforms, each with a reach rule for the checker. |
 | 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
+| 6c-3 | Generated features | Recipes opt into one-way platforms, springs, mud and mirrors; placement rules for wide and tall levels that keep gates honest; layouts must include every feature asked for; the campaign introduces them in turn. |
 | 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |
 | 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
 | 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |

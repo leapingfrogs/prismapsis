@@ -2,60 +2,60 @@
 # Change those and regenerate rather than editing this file.
 name = "Green Shoots"
 map = '''
-####################################################################################################
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                                                                                  #
-#                                    GG                                                            #
-#                                    GG                                                            #
-#                                    GG                                                            #
-#                                    GG                                  BB                        #
-#                                ggg GG                                  BB                        #
-#                                    GG                                  BB                        #
-#                                    GG                                  BB                        #
-#                                    GG       5                      bbb BB   #####                #
-#                  4        ggg      GG     CCCC                         BB                        #
-#                #####               GG                  3               BB            ###         #
-#                                    GG                                  BB                        #
-#        2                           GG                         bbb      BB                        #
-#                       ###############                                  BB                        #
-#                       ###############                                  BB    ##  ##              #
-#                    ##################       ##   ##   ##               BB  K ##  ##           XX #
-#      ##  ##     #####################  K    ##   ##   ##   ##########################         XX #
-#  @   ##  ##  ##########################################################################       XX #
-####################################################################################################
+#####################################################################################################
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                                                                                   #
+#                                   GG                                                              #
+#                                   GG                                   BB                         #
+#                                   GG                                   BB                         #
+#                                   GG                                   BB                         #
+#                               ggg GG                                   BB                         #
+#       4                           GG                  5            bbb BB      ###                #
+#     CCCC       2                  GG                ====               BB                         #
+#                                   GG                                   BB                         #
+#                          ggg      GG              3                    BB                         #
+#                                   GG                          bbb      BB                      XX #
+#            #####  ##              GG       ###                         BB    ###   ###         XX #
+#         ########  ##              GG  K #########      ####            BB  K ###   ###         XX #
+#  @   ###############################################   ####            BB##########################
+#####################################################################################################
 '''
 background = '''
 
 
-
-
-                                                                          YY
-                                                                          YY
-           YYYY                                                           YY
-           YYYY                                                           YY
-           YYYY                                                           YY
-           YYYY                                                           YY
-           YYYY                                                           YY
-           YYYY
-
-
-
-
-                                                           CC        MMMM        R
-                                                           CC        MMMM        R
-                                                           CC                    R
-                                                                                 R      M
-  BB                                                                                    M
-  BB                                                                                    M
-  BB                                                                                    M
-  BB                                                                                    M
+                      BB
+                      BB
+                      BB                                                           MMMM
+                B     BB                                                           MMMM
+  BB            B     BB                                                           MMMM
+  BB            B     BB                                                           MMMM
+  BB                  BB                                                           MMMM
+  BB                                                                               MMMM
   BB
+  BB
+  BB                                                               M
+                                                                   M
+
+                               B
+                               B
+                               B                                            MM
+                               B                                            MM
+                                                    B
+                                                    B
+                                                    B                                    YY
+                                                    B                                    YY
+                                                                                         YY
+
 
 
 '''
@@ -65,8 +65,9 @@ seed = 2
 shape = "wide"
 gates = ["green", "blue"]
 lenses = 1
+features = ["platforms"]
 wave-interval = 10.0
-attempt = 0
+attempt = 1
 
 [waves]
 interval = 10.0
@@ -75,4 +76,4 @@ interval = 10.0
 "2" = { lens = "green" }
 "3" = { lens = "blue" }
 "4" = { pickup = "rear-shot", hidden = "green" }
-"5" = { pickup = "spread", hidden = "blue" }
+"5" = { pickup = "piercing", hidden = "blue" }

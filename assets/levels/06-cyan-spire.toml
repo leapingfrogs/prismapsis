@@ -2,62 +2,92 @@
 # Change those and regenerate rather than editing this file.
 name = "Cyan Spire"
 map = '''
-#############################
-#                           #
-#                           #
-#                           #
-#                           #
-# XX                        #
-# XX                        #
-# XX                        #
-###########                 #
-#                           #
-#                           #
-#                           #
-#                           #
-#              ##############
-#                           #
-#                           #
-#                           #
-#     K                     #
-#RRRRRRRRRRR                #
-#                           #
-#                           #
-#                           #
-#                           #
-#              mmmmmmmmmmmmm#
-#                           #
-#                           #
-#               3     1     #
-# 5                         #
-############                #
-#                           #
-#                           #
-#                           #
-#                    K      #
-#              CCCCCCCCCCCCC#
-#                           #
-#                           #
-#                           #
-#                           #
-#cccccccc                   #
-#                           #
-#          2                #
-#   3                       #
-#                         4 #
-#             ###############
-#                           #
-#                           #
-#                           #
-#                           #
-#CCCCCCCCCC                 #
-#                           #
-#                           #
-#                           #
-#                       @   #
-#############################
+############################
+#                          #
+#                          #
+#                          #
+#                          #
+#                       XX #
+#                       XX #
+#                       XX #
+#               CCCCCCCCCCC#
+#                          #
+#                          #
+#                          #
+#                          #
+#CCCCCCCCC                 #
+#                          #
+#                          #
+#                          #
+#                          #
+#             %%%%%%%%%%%%%#
+#                          #
+#                          #
+#                          #
+#   K                      #
+#^^CCCCCC                  #
+#                          #
+#                          #
+#                          #
+#                          #
+#           mmmmmmmmmmmmmmm#
+#                          #
+#               3          #
+#        1                 #
+# 5                        #
+#========                  #
+#                          #
+#                          #
+#                          #
+#                          #
+#            MMMMMMMMMMMMMM%
+#                          %
+#                          %
+#                          #
+#  K                       #
+#%%%%%%                    #
+#                          #
+#                          #
+#                          #
+#                          #
+#           ccccccccccccccc#
+#                          #
+#      3                   #
+#                  2       #
+# 4                        #
+#%%%%%%%%                  #
+#                          #
+#                          #
+#                          #
+#                          #
+#             BBBBBBBBBBBBB#
+#                          #
+#                          #
+#                          #
+#                          #
+#^^=======                 #
+#                          #
+#                          #
+#                          #
+#                      @   #
+############################
 '''
 background = '''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -119,8 +149,9 @@ seed = 6
 shape = "tall"
 gates = ["cyan", "magenta"]
 lenses = 2
+features = ["platforms", "springs", "mirrors"]
 wave-interval = 8.0
-attempt = 0
+attempt = 1
 
 [waves]
 interval = 8.0
@@ -129,5 +160,5 @@ interval = 8.0
 "1" = { lens = "red" }
 "2" = { lens = "green" }
 "3" = { lens = "blue" }
-"4" = { pickup = "spread", hidden = "cyan" }
-"5" = { pickup = "rapid-fire", hidden = "magenta" }
+"4" = { pickup = "piercing", hidden = "cyan" }
+"5" = { pickup = "spread", hidden = "magenta" }
