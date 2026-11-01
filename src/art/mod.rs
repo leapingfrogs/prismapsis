@@ -1,11 +1,14 @@
-//! Generated art: themed tilesets painted offline by `just art` and drawn
-//! with a filter that holds back each hue until it has been restored.
+//! Generated art, painted offline by `just art`: themed tilesets drawn with
+//! a filter that holds back each hue until it has been restored, and a grey
+//! sprite sheet tinted in the game.
 //!
 //! Walls are drawn on a dual grid: each tile sits on a corner where four
 //! level cells meet and shows which of them are solid, so 16 tiles cover
 //! every edge and corner.
 
+pub mod figures;
 pub mod paint;
+pub mod sprites;
 pub mod tiles;
 
 /// Tile size in pixels: 2× the 40-unit cell, to stay sharp at 4K.

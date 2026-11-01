@@ -5,18 +5,21 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
+use crate::art::figures::{Animation, Sheet, stagger};
+use crate::art::sprites::Figure;
 use crate::beam::{
     BeamColour, BeamEnergy, BeamLoadout, BeamTrace, BeamTuning, RayScene, trace_from_hero,
 };
 use crate::enemy::{
-    BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, ORB_RADIUS, Orb, STARTING_LIVES,
+    BURST_LIFETIME, Burst, Enemy, EnemyKind, HIT_FLASH, Lives, Orb, STARTING_LIVES,
 };
+use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
 use crate::level::{Checkpoint, RoomBounds, Solid};
 use crate::light::{Colour, Hidden, Primary};
 use crate::physics::BounceTuning;
-use crate::powerup::{Abilities, PICKUP_RADIUS, Pickup, PowerUp, PowerUpTuning, pickup_shown};
-use crate::prism::{PRISM_RADIUS, Prism, PrismFrozen};
+use crate::powerup::{Abilities, Pickup, PowerUp, PowerUpTuning, pickup_shown};
+use crate::prism::{Prism, PrismFrozen};
 use std::f32::consts::FRAC_PI_2;
 
 /// Vertical extent of the view in world units, regardless of window size.
@@ -25,8 +28,7 @@ pub const DESIGN_HEIGHT: f32 = crate::level::VIEW_HEIGHT;
 /// How quickly the camera catches up with the hero (per second).
 const CAMERA_FOLLOW_RATE: f32 = 6.0;
 
-const HERO_COLOUR: Color = Color::srgb(0.92, 0.92, 0.96);
-const HERO_MARK_COLOUR: Color = Color::srgb(0.35, 0.75, 0.95);
+const HERO_COLOUR: Color = Color::srgb(0.95, 0.96, 1.0);
 
 #[derive(Debug, Default)]
 pub struct PresentationPlugin;
@@ -53,6 +55,7 @@ impl Plugin for PresentationPlugin {
                     toggle_fullscreen,
                     sync_positions,
                     spin_hero_visual,
+                    squash_hero,
                     follow_hero.after(sync_positions),
                     orient_prism.after(sync_positions),
                     tint_frozen_prism,
@@ -81,44 +84,26 @@ impl Plugin for PresentationPlugin {
             .add_plugins((
                 crate::spectrum_view::SpectrumViewPlugin,
                 crate::art::tiles::TilesPlugin,
+                crate::art::figures::FiguresPlugin,
             ));
     }
 }
 
-const PRISM_COLOUR: Color = Color::srgba(0.8, 0.92, 1.0, 0.7);
-const PRISM_FROZEN_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.95);
+const PRISM_COLOUR: Color = Color::srgba(0.8, 0.92, 1.0, 0.85);
+const PRISM_FROZEN_COLOUR: Color = Color::srgb(1.0, 1.0, 1.0);
 
-/// Materials for the prism's normal and frozen states.
-#[derive(Resource, Debug)]
-struct PrismMaterials {
-    normal: Handle<ColorMaterial>,
-    frozen: Handle<ColorMaterial>,
-}
-
+/// The prism is a glass triangle with its tip along +y; `orient_prism`
+/// turns the tip to face away from the hero.
 fn draw_prism(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     prisms: Query<(Entity, &Position), Added<Prism>>,
 ) {
     for (entity, pos) in &prisms {
-        let prism_materials = PrismMaterials {
-            normal: materials.add(PRISM_COLOUR),
-            frozen: materials.add(PRISM_FROZEN_COLOUR),
-        };
-        // Equilateral triangle with its tip along +y; `orient_prism` turns
-        // the tip to face away from the hero.
-        let triangle = Triangle2d::new(
-            Vec2::new(0.0, PRISM_RADIUS),
-            Vec2::from_angle(210f32.to_radians()) * PRISM_RADIUS,
-            Vec2::from_angle(330f32.to_radians()) * PRISM_RADIUS,
-        );
         commands.entity(entity).insert((
-            Mesh2d(meshes.add(triangle)),
-            MeshMaterial2d(prism_materials.normal.clone()),
+            sheet.sprite(Figure::Prism, PRISM_COLOUR),
             Transform::from_translation(pos.0.extend(2.0)),
         ));
-        commands.insert_resource(prism_materials);
     }
 }
 
@@ -140,24 +125,16 @@ fn orient_prism(
 }
 
 /// Brighten the prism while it is held in place.
-fn tint_frozen_prism(
-    frozen: Res<PrismFrozen>,
-    materials: Option<Res<PrismMaterials>>,
-    mut prisms: Query<&mut MeshMaterial2d<ColorMaterial>, With<Prism>>,
-) {
-    let Some(materials) = materials else {
-        return;
-    };
-    if !frozen.is_changed() && !materials.is_added() {
-        return;
-    }
-    let handle = if frozen.0 {
-        &materials.frozen
+fn tint_frozen_prism(frozen: Res<PrismFrozen>, mut prisms: Query<&mut Sprite, With<Prism>>) {
+    let colour = if frozen.0 {
+        PRISM_FROZEN_COLOUR
     } else {
-        &materials.normal
+        PRISM_COLOUR
     };
-    for mut material in &mut prisms {
-        material.0 = handle.clone();
+    for mut sprite in &mut prisms {
+        if sprite.color != colour {
+            sprite.color = colour;
+        }
     }
 }
 
@@ -238,31 +215,90 @@ fn light_checkpoints(
     }
 }
 
+/// The hero's drawing, squashed and stretched by its bounces; its surface
+/// and shading are children, so neither turns the squash.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct HeroBody {
+    /// Seconds since the last bounce.
+    pub since_bounce: f32,
+}
+
+/// The hero's markings, which turn as it spins under its fixed shading.
+#[derive(Component, Debug)]
+pub struct HeroSurface;
+
 fn draw_hero(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     heroes: Query<(Entity, &Position), Added<Hero>>,
 ) {
     for (entity, pos) in &heroes {
-        // An off-centre mark makes the spin visible.
-        let mark = commands
+        let surface = commands
+            .spawn((HeroSurface, sheet.sprite(Figure::HeroSurface, HERO_COLOUR)))
+            .id();
+        let shade = commands
             .spawn((
-                Mesh2d(meshes.add(circle_mesh(HERO_RADIUS * 0.3))),
-                MeshMaterial2d(materials.add(HERO_MARK_COLOUR)),
-                Transform::from_xyz(0.0, HERO_RADIUS * 0.5, 0.1),
+                sheet.sprite(Figure::HeroShade, Color::WHITE),
+                Transform::from_xyz(0.0, 0.0, 0.1),
             ))
+            .id();
+        let body = commands
+            .spawn((
+                HeroBody {
+                    since_bounce: SQUASH_TIME,
+                },
+                Transform::default(),
+                Visibility::default(),
+            ))
+            .add_children(&[surface, shade])
             .id();
         commands
             .entity(entity)
             .insert((
-                Mesh2d(meshes.add(circle_mesh(HERO_RADIUS))),
-                MeshMaterial2d(materials.add(HERO_COLOUR)),
                 Transform::from_translation(pos.0.extend(1.0)),
                 // Explicit so `blink_hero` always has it to toggle.
                 Visibility::default(),
             ))
-            .add_child(mark);
+            .add_child(body);
+    }
+}
+
+/// How long a bounce's wobble lasts (seconds).
+const SQUASH_TIME: f32 = 0.6;
+
+/// How much the hero squashes on landing, as a fraction of its height.
+const SQUASH: f32 = 0.24;
+
+/// The hero's scale `since` seconds after a bounce: flattened on landing,
+/// then springing tall and settling back, keeping its area.
+#[must_use]
+pub fn squash(since: f32) -> Vec2 {
+    if since >= SQUASH_TIME {
+        return Vec2::ONE;
+    }
+    let wobble = (since * std::f32::consts::TAU * 3.5).cos();
+    let tall = 1.0 - SQUASH * (-since * 8.0).exp() * wobble;
+    Vec2::new(1.0 / tall, tall)
+}
+
+/// Squash the hero when it bounces, keeping its base on the floor.
+fn squash_hero(
+    time: Res<Time>,
+    mut events: MessageReader<GameEvent>,
+    mut bodies: Query<(&mut HeroBody, &mut Transform)>,
+) {
+    let bounced = events
+        .read()
+        .any(|event| matches!(event, GameEvent::Bounced { .. }));
+    for (mut body, mut transform) in &mut bodies {
+        body.since_bounce = if bounced {
+            0.0
+        } else {
+            (body.since_bounce + time.delta_secs()).min(SQUASH_TIME)
+        };
+        let scale = squash(body.since_bounce);
+        transform.scale = scale.extend(1.0);
+        transform.translation.y = -(1.0 - scale.y) * HERO_RADIUS;
     }
 }
 
@@ -510,51 +546,60 @@ pub fn coloured_enemy(kind: EnemyKind, colour: Option<Primary>) -> Color {
     }
 }
 
-/// Motes are small round sparks; lenses are hexagonal crystals. Each gets
-/// its own material so it can flash independently.
+/// How each enemy kind's figure animates: motes twinkle all the time, and a
+/// glint crosses each lens now and then.
+#[must_use]
+pub const fn enemy_animation(kind: EnemyKind) -> (Figure, f32, f32) {
+    match kind {
+        EnemyKind::Mote => (Figure::Mote, 12.0, 0.0),
+        EnemyKind::Lens => (Figure::Lens, 14.0, 3.0),
+    }
+}
+
+/// Motes are twinkling sparks; lenses are hexagonal crystals with an eye.
 fn draw_enemies(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     enemies: Query<(Entity, &Position, &Enemy, Option<&Colour>), Added<Enemy>>,
 ) {
     for (entity, pos, enemy, colour) in &enemies {
-        let mesh = match enemy.kind {
-            EnemyKind::Mote => meshes.add(circle_mesh(enemy.radius())),
-            EnemyKind::Lens => meshes.add(RegularPolygon::new(enemy.radius(), 6)),
-        };
+        let (figure, rate, every) = enemy_animation(enemy.kind);
         commands.entity(entity).insert((
-            Mesh2d(mesh),
-            MeshMaterial2d(materials.add(coloured_enemy(enemy.kind, colour.map(|c| c.0)))),
+            sheet.sprite(figure, coloured_enemy(enemy.kind, colour.map(|c| c.0))),
+            Animation {
+                figure,
+                rate,
+                every,
+                offset: stagger(entity, every.max(1.0)),
+            },
             Transform::from_translation(pos.0.extend(0.5)),
         ));
     }
 }
 
 /// Flash enemies towards white while their hit flash lasts.
-fn tint_enemies(
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    enemies: Query<(&Enemy, Option<&Colour>, &MeshMaterial2d<ColorMaterial>), Changed<Enemy>>,
-) {
-    for (enemy, colour, material) in &enemies {
-        if let Some(mut material) = materials.get_mut(&material.0) {
-            let flash = (enemy.flash / HIT_FLASH).clamp(0.0, 1.0);
-            let base = coloured_enemy(enemy.kind, colour.map(|c| c.0));
-            material.color = base.mix(&ENEMY_HIT_COLOUR, flash);
-        }
+fn tint_enemies(mut enemies: Query<(&Enemy, Option<&Colour>, &mut Sprite), Changed<Enemy>>) {
+    for (enemy, colour, mut sprite) in &mut enemies {
+        let flash = (enemy.flash / HIT_FLASH).clamp(0.0, 1.0);
+        let base = coloured_enemy(enemy.kind, colour.map(|c| c.0));
+        sprite.color = base.mix(&ENEMY_HIT_COLOUR, flash);
     }
 }
 
 fn draw_orbs(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     orbs: Query<(Entity, &Position), Added<Orb>>,
 ) {
     for (entity, pos) in &orbs {
         commands.entity(entity).insert((
-            Mesh2d(meshes.add(circle_mesh(ORB_RADIUS))),
-            MeshMaterial2d(materials.add(ORB_COLOUR)),
+            sheet.sprite(Figure::Orb, ORB_COLOUR),
+            Animation {
+                figure: Figure::Orb,
+                rate: 12.0,
+                every: 0.0,
+                offset: stagger(entity, 1.0),
+            },
             Transform::from_translation(pos.0.extend(2.5)),
         ));
     }
@@ -590,9 +635,6 @@ fn animate_bursts(
     }
 }
 
-const PICKUP_BACKDROP_COLOUR: Color = Color::srgba(0.05, 0.05, 0.1, 0.85);
-const GLYPH_COLOUR: Color = Color::srgb(1.0, 1.0, 1.0);
-
 /// Ring and HUD colour for each power-up.
 #[must_use]
 pub const fn power_up_colour(power: PowerUp) -> Color {
@@ -605,114 +647,28 @@ pub const fn power_up_colour(power: PowerUp) -> Color {
     }
 }
 
-/// A simple shape in a pickup's glyph.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum GlyphPart {
-    /// A triangle of this size, pointing along +x before rotation.
-    Arrowhead(f32),
-    /// A bar of this length and width, along +x before rotation.
-    Bar(f32, f32),
-    /// A ring of this outer radius.
-    Ring(f32),
-}
-
-/// The shapes that make up each power-up's glyph, with where they sit
-/// (offset and rotation in radians) inside the pickup ring.
-#[must_use]
-pub fn glyph_parts(power: PowerUp) -> Vec<(GlyphPart, Vec2, f32)> {
-    use std::f32::consts::PI;
-    let s = PICKUP_RADIUS * 0.5;
-    match power {
-        // An arrow rising above a floor line: hovering.
-        PowerUp::AntiGravity => vec![
-            (
-                GlyphPart::Arrowhead(s * 0.8),
-                Vec2::new(0.0, s * 0.35),
-                FRAC_PI_2,
-            ),
-            (GlyphPart::Bar(s * 1.6, 3.0), Vec2::new(0.0, -s * 0.7), 0.0),
-        ],
-        // A double-headed arrow: firing both ways.
-        PowerUp::RearShot => vec![
-            (GlyphPart::Bar(s * 1.2, 3.0), Vec2::ZERO, 0.0),
-            (GlyphPart::Arrowhead(s * 0.6), Vec2::new(s * 0.7, 0.0), 0.0),
-            (GlyphPart::Arrowhead(s * 0.6), Vec2::new(-s * 0.7, 0.0), PI),
-        ],
-        // Three rays fanning out.
-        PowerUp::Spread => [-0.45f32, 0.0, 0.45]
-            .into_iter()
-            .map(|angle| {
-                let offset = Vec2::from_angle(angle) * s * 0.7 - Vec2::new(s * 0.6, 0.0);
-                (GlyphPart::Bar(s * 1.4, 3.0), offset, angle)
-            })
-            .collect(),
-        // Fast-forward: two arrowheads in a row.
-        PowerUp::RapidFire => vec![
-            (
-                GlyphPart::Arrowhead(s * 0.7),
-                Vec2::new(-s * 0.35, 0.0),
-                0.0,
-            ),
-            (GlyphPart::Arrowhead(s * 0.7), Vec2::new(s * 0.45, 0.0), 0.0),
-        ],
-        // A beam passing through a ring.
-        PowerUp::Piercing => vec![
-            (GlyphPart::Ring(s * 0.55), Vec2::ZERO, 0.0),
-            (GlyphPart::Bar(s * 1.9, 3.0), Vec2::ZERO, 0.0),
-        ],
-    }
-}
-
-fn glyph_mesh(part: GlyphPart) -> Mesh {
-    match part {
-        GlyphPart::Arrowhead(size) => Triangle2d::new(
-            Vec2::new(size * 0.6, 0.0),
-            Vec2::new(-size * 0.4, size * 0.55),
-            Vec2::new(-size * 0.4, -size * 0.55),
-        )
-        .into(),
-        GlyphPart::Bar(length, width) => Rectangle::new(length, width).into(),
-        GlyphPart::Ring(radius) => Annulus::new(radius - 3.0, radius).into(),
-    }
-}
-
-/// Pickups are a coloured ring around a white glyph naming the power-up.
+/// Pickups are a glass bubble in the power-up's colour round a white glyph
+/// naming it.
 fn draw_pickups(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     pickups: Query<(Entity, &Position, &Pickup), Added<Pickup>>,
 ) {
-    if pickups.is_empty() {
-        return;
-    }
-    let glyph_material = materials.add(GLYPH_COLOUR);
     for (entity, pos, pickup) in &pickups {
-        let backdrop = commands
+        let glyph = commands
             .spawn((
-                Mesh2d(meshes.add(circle_mesh(PICKUP_RADIUS * 0.85))),
-                MeshMaterial2d(materials.add(PICKUP_BACKDROP_COLOUR)),
-                Transform::from_xyz(0.0, 0.0, -0.1),
+                sheet.sprite(Figure::Glyph(pickup.power), Color::WHITE),
+                Transform::from_xyz(0.0, 0.0, 0.1),
             ))
             .id();
-        commands.entity(entity).insert((
-            Mesh2d(meshes.add(Annulus::new(PICKUP_RADIUS * 0.82, PICKUP_RADIUS))),
-            MeshMaterial2d(materials.add(power_up_colour(pickup.power))),
-            Transform::from_translation(pos.0.extend(0.8)),
-            Visibility::default(),
-        ));
-        commands.entity(entity).add_child(backdrop);
-        for (part, offset, angle) in glyph_parts(pickup.power) {
-            let glyph = commands
-                .spawn((
-                    Mesh2d(meshes.add(glyph_mesh(part))),
-                    MeshMaterial2d(glyph_material.clone()),
-                    Transform::from_translation(offset.extend(0.1))
-                        .with_rotation(Quat::from_rotation_z(angle)),
-                ))
-                .id();
-            commands.entity(entity).add_child(glyph);
-        }
+        commands
+            .entity(entity)
+            .insert((
+                sheet.sprite(Figure::Bubble, power_up_colour(pickup.power)),
+                Transform::from_translation(pos.0.extend(0.8)),
+                Visibility::default(),
+            ))
+            .add_child(glyph);
     }
 }
 
@@ -848,17 +804,6 @@ fn update_life_pips(lives: Res<Lives>, mut pips: Query<(&LifePip, &mut Node)>) {
     }
 }
 
-/// Segments per circle: enough to look round at 4K, where the hero is about
-/// 100 pixels across.
-const CIRCLE_SEGMENTS: u32 = 64;
-
-fn circle_mesh(radius: f32) -> Mesh {
-    Circle::new(radius)
-        .mesh()
-        .resolution(CIRCLE_SEGMENTS)
-        .build()
-}
-
 /// F11 switches between a window and borderless fullscreen at the monitor's
 /// native resolution.
 fn toggle_fullscreen(
@@ -904,15 +849,19 @@ pub fn interpolate(previous: Vec2, current: Vec2, alpha: f32) -> Vec2 {
     previous.lerp(current, alpha.clamp(0.0, 1.0))
 }
 
-/// Rotate the hero as if rolling at its spin speed (clockwise when moving
-/// right).
+/// Turn the hero's surface as if rolling at its spin speed (clockwise when
+/// moving right).
 fn spin_hero_visual(
     time: Res<Time>,
     tuning: Res<BounceTuning>,
-    mut heroes: Query<(&Spin, &mut Transform), With<Hero>>,
+    heroes: Query<&Spin, With<Hero>>,
+    mut surfaces: Query<&mut Transform, With<HeroSurface>>,
 ) {
-    for (spin, mut transform) in &mut heroes {
-        let angular_speed = -tuning.horizontal_speed(spin.0) / HERO_RADIUS;
+    let Ok(spin) = heroes.single() else {
+        return;
+    };
+    let angular_speed = -tuning.horizontal_speed(spin.0) / HERO_RADIUS;
+    for mut transform in &mut surfaces {
         transform.rotate_z(angular_speed * time.delta_secs());
     }
 }
@@ -1138,17 +1087,6 @@ mod tests {
     }
 
     #[test]
-    fn every_power_up_has_a_distinct_glyph() {
-        let glyphs: Vec<_> = PowerUp::ALL.into_iter().map(glyph_parts).collect();
-        assert!(glyphs.iter().all(|parts| !parts.is_empty()));
-        for (i, a) in glyphs.iter().enumerate() {
-            for b in &glyphs[i + 1..] {
-                assert_ne!(a, b);
-            }
-        }
-    }
-
-    #[test]
     fn pickups_are_drawn_and_collected_abilities_show_in_the_hud() {
         let mut app = presentation_app();
         app.update();
@@ -1160,9 +1098,14 @@ mod tests {
             ))
             .id();
         app.update();
-        let glyph_parts_drawn = app.world().get::<Children>(pickup).map_or(0, Children::len);
-        assert_eq!(glyph_parts_drawn, 1 + glyph_parts(PowerUp::Spread).len());
-        assert!(app.world().get::<Mesh2d>(pickup).is_some());
+        let bubble = app.world().get::<Sprite>(pickup).unwrap();
+        assert_eq!(bubble.rect, Some(Figure::Bubble.rect(0)));
+        assert_eq!(bubble.color, power_up_colour(PowerUp::Spread));
+        let glyph = app.world().get::<Children>(pickup).unwrap()[0];
+        assert_eq!(
+            app.world().get::<Sprite>(glyph).unwrap().rect,
+            Some(Figure::Glyph(PowerUp::Spread).rect(0))
+        );
 
         let shown_pips = |app: &mut App| {
             let world = app.world_mut();
@@ -1236,12 +1179,12 @@ mod tests {
         app.update();
         let world = app.world_mut();
         let undrawn_enemies = world
-            .query_filtered::<(), (With<Enemy>, Without<Mesh2d>)>()
+            .query_filtered::<(), (With<Enemy>, Without<Sprite>)>()
             .iter(world)
             .count();
         assert_eq!(undrawn_enemies, 0);
         let drawn_orbs = world
-            .query_filtered::<(), (With<Orb>, With<Mesh2d>)>()
+            .query_filtered::<(), (With<Orb>, With<Sprite>, With<Animation>)>()
             .iter(world)
             .count();
         assert_eq!(drawn_orbs, 1);
@@ -1296,6 +1239,39 @@ mod tests {
     }
 
     #[test]
+    fn a_bounce_squashes_then_settles_keeping_area() {
+        let landed = squash(0.0);
+        assert!(landed.y < 0.8 && landed.x > 1.2, "{landed}");
+        let springing = squash(0.15);
+        assert!(springing.y > 1.0, "{springing}");
+        for t in [0.0, 0.1, 0.3, 0.5] {
+            assert!((squash(t).x * squash(t).y - 1.0).abs() < 1e-5);
+        }
+        assert_eq!(squash(SQUASH_TIME), Vec2::ONE);
+    }
+
+    #[test]
+    fn the_hero_squashes_when_it_bounces() {
+        let mut app = presentation_app();
+        let mut squashed = false;
+        for _ in 0..120 {
+            app.update();
+            let world = app.world_mut();
+            let (body, transform) = world
+                .query::<(&HeroBody, &Transform)>()
+                .single(world)
+                .unwrap();
+            if body.since_bounce < 0.05 {
+                squashed |= transform.scale.y < 0.9;
+                // Its base stays on the floor.
+                let base = transform.translation.y - HERO_RADIUS * transform.scale.y;
+                assert!((base + HERO_RADIUS).abs() < 1e-3);
+            }
+        }
+        assert!(squashed, "the hero should have bounced in two seconds");
+    }
+
+    #[test]
     fn interpolate_blends_and_clamps() {
         let (a, b) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 20.0));
         assert_eq!(interpolate(a, b, 0.0), a);
@@ -1319,12 +1295,19 @@ mod tests {
         }
         let world = app.world_mut();
 
+        // The surface turns; the hero itself, and so its shading, doesn't.
+        let surface_rotation = world
+            .query_filtered::<&Transform, With<HeroSurface>>()
+            .single(world)
+            .unwrap()
+            .rotation;
+        assert_ne!(surface_rotation, Quat::IDENTITY);
         let hero_rotation = world
             .query_filtered::<&Transform, With<Hero>>()
             .single(world)
             .unwrap()
             .rotation;
-        assert_ne!(hero_rotation, Quat::IDENTITY);
+        assert_eq!(hero_rotation, Quat::IDENTITY);
 
         let camera = world
             .query_filtered::<&Transform, With<MainCamera>>()

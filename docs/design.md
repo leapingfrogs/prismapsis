@@ -414,9 +414,20 @@ output is committed; the game only ever loads level files.
   - **Foundry** (10–12, later): dark iron plates and rivets with glowing
     seams, and gratings for panels.
 - **Sprites** for the hero, enemies, orbs, pickups and the prism are drawn
-  in white and greys and tinted in the game, so one sheet serves every
-  colour. The hero's surface turns with its spin while its highlight stays
-  on top, and it squashes and stretches on each bounce.
+  in white and greys on one sheet (`assets/art/sprites.png`, painted by
+  `just art`) and tinted in the game, so one sheet serves every colour.
+  - **Hero:** a white ball with grey bands swirling from a hub. The bands
+    turn with its spin under a separate layer of shading and highlight, lit
+    from the top left, which stays put. It squashes flat on each bounce,
+    then springs tall and settles, keeping its base on the floor.
+  - **Motes** are twinkling sparks whose rays turn and flicker. **Lenses**
+    are hexagonal crystals with lit facets round a flat table and a dark
+    eye; a glint crosses each one every few seconds, with lenses out of
+    step. **Orbs** glow, with two bright arcs circling them.
+  - **Pickups** are dark glass bubbles in a lit rim, tinted by the
+    power-up, round its white glyph. The **prism** is a glass triangle with
+    a bright rim and lines to its corners.
+  - Bursts, checkpoints and beams are still simple shapes.
 
 ## Sound
 
@@ -485,7 +496,7 @@ output is committed; the game only ever loads level files.
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
 | 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |
 | 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
-| 7c | Sprites | Generated, animated sprites for the hero, enemies, orbs, pickups and the prism. |
+| 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
 | 8 | Game loop | Menus, game over, score, music, audio settings. Pause is done. |
 | 9+ | 3D | To be designed. |
