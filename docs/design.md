@@ -274,6 +274,16 @@ reads well in a terminal or text editor and is easy to generate.
 
 - **One hit loses a life** and returns the hero to the last checkpoint.
 
+## Pausing
+
+- **P** (gamepad **Start**) pauses and resumes. The game clock stops, so
+  the simulation, timers, animations and sounds all hold still, and a
+  "Paused" overlay shows.
+- Play inputs are ignored while paused, so pressing spin or fire then
+  changes nothing on resume.
+- Level files still reload while paused, so a level can be edited without
+  the hero moving.
+
 ## Resolution and art
 
 - The world is **1080 units tall** at any window size; width follows the

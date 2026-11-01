@@ -16,6 +16,7 @@ pub mod events;
 pub mod hero;
 pub mod level;
 pub mod light;
+pub mod pause;
 pub mod physics;
 pub mod powerup;
 pub mod prism;
@@ -74,13 +75,17 @@ impl Plugin for SimulationPlugin {
             .register_type::<physics::BounceTuning>()
             .add_systems(Startup, hero::spawn_hero)
             .init_resource::<hero::HoverInput>()
-            .add_systems(Update, (hero::spin_input, hero::hover_input))
+            .add_systems(
+                Update,
+                (hero::spin_input, hero::hover_input).run_if(pause::running),
+            )
             .add_systems(
                 FixedUpdate,
                 (hero::move_hero, hero::update_facing.after(hero::move_hero)),
             )
             .add_plugins((
                 level::LevelPlugin,
+                pause::PausePlugin,
                 prism::PrismPlugin,
                 beam::BeamPlugin,
                 enemy::EnemyPlugin,

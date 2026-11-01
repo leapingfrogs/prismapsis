@@ -381,7 +381,7 @@ impl Plugin for SoundPlugin {
                 )
                     .chain(),
             )
-            .add_systems(Update, drive_beam_loops);
+            .add_systems(Update, (drive_beam_loops, pause_audio));
     }
 }
 
@@ -396,6 +396,20 @@ fn load_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         })
         .collect();
     commands.insert_resource(SoundBank(bank));
+}
+
+/// Hold every sound while the game is paused, and carry on when it resumes.
+fn pause_audio(time: Res<Time<Virtual>>, sinks: Query<&AudioSink>) {
+    let paused = time.is_paused();
+    for sink in &sinks {
+        if sink.is_paused() != paused {
+            if paused {
+                sink.pause();
+            } else {
+                sink.play();
+            }
+        }
+    }
 }
 
 fn spawn_listener(mut commands: Commands) {

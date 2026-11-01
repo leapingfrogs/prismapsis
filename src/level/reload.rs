@@ -47,7 +47,7 @@ impl Plugin for LevelReloadPlugin {
 /// campaign too. A file with problems is reported and the level kept as it
 /// is. Moving to another level starts watching its file.
 fn reload_level(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     mut watch: ResMut<LevelWatch>,
     mut campaign: ResMut<Campaign>,
     mut level: ResMut<CurrentLevel>,
