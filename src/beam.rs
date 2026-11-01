@@ -361,7 +361,7 @@ impl Plugin for BeamPlugin {
             .init_resource::<BeamEnergy>()
             .init_resource::<FireHeld>()
             .init_resource::<DamageTimer>()
-            .add_systems(Update, fire_input)
+            .add_systems(Update, fire_input.run_if(crate::pause::running))
             .add_systems(
                 FixedUpdate,
                 (update_energy, damage_enemies)

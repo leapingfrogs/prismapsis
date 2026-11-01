@@ -86,7 +86,7 @@ impl Plugin for PrismPlugin {
             .init_resource::<PrismFrozen>()
             .init_resource::<PrismNudge>()
             .add_systems(Startup, spawn_prism)
-            .add_systems(Update, prism_input)
+            .add_systems(Update, prism_input.run_if(crate::pause::running))
             .add_systems(FixedUpdate, orbit_prism.after(move_hero));
     }
 }

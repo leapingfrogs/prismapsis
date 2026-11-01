@@ -43,6 +43,7 @@ impl Plugin for PresentationPlugin {
                     spawn_energy_bar,
                     spawn_life_pips,
                     spawn_ability_pips,
+                    crate::pause::spawn_overlay,
                 ),
             )
             .add_systems(
@@ -66,6 +67,7 @@ impl Plugin for PresentationPlugin {
                     animate_bursts,
                     blink_hero,
                     update_life_pips,
+                    crate::pause::show_overlay,
                 ),
             )
             .add_systems(
