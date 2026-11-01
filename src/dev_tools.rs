@@ -7,10 +7,12 @@ use bevy::prelude::*;
 use bevy::window::{PresentMode, PrimaryWindow};
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 
+use crate::art::paint::themes;
+use crate::art::tiles::ThemeChoice;
 use crate::beam::BeamTuning;
 use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
 use crate::hero::{Hero, Position, PreviousPosition, Spin, Velocity};
-use crate::level::{CurrentLevel, RespawnPoint};
+use crate::level::{Campaign, CurrentLevel, RespawnPoint};
 use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
@@ -112,8 +114,12 @@ fn tuning_panel(
     mut powerup_tuning: ResMut<PowerUpTuning>,
     mut abilities: ResMut<Abilities>,
     (mut sound, mut light): (SoundPanel, LightPanel),
-    (kills, lives, level): (Res<Kills>, Res<Lives>, Res<CurrentLevel>),
-    mut reset_room: ResMut<ResetRoom>,
+    (kills, lives, mut level): (Res<Kills>, Res<Lives>, ResMut<CurrentLevel>),
+    (mut reset_room, mut campaign, mut theme): (
+        ResMut<ResetRoom>,
+        Option<ResMut<Campaign>>,
+        Option<ResMut<ThemeChoice>>,
+    ),
     heroes: Query<(&Position, &Velocity, &Spin), With<Hero>>,
     diagnostics: Res<DiagnosticsStore>,
     mut fixed_time: ResMut<Time<Fixed>>,
@@ -153,7 +159,16 @@ fn tuning_panel(
                 if ui.button("Reset room").clicked() {
                     reset_room.0 = true;
                 }
+                if let Some(campaign) = campaign.as_mut()
+                    && ui.button("Next level").clicked()
+                {
+                    campaign.advance();
+                    level.set_if_neq(CurrentLevel(campaign.level().level.clone()));
+                }
             });
+            if let Some(theme) = theme.as_mut() {
+                theme_section(ui, theme);
+            }
             ui.separator();
             ui.label(format!("level: {}", level.0.name));
             for (pos, vel, spin) in &heroes {
@@ -316,6 +331,25 @@ fn sound_section(ui: &mut egui::Ui, panel: &mut SoundPanel) {
             auditions.0.push(choice.0);
         }
     });
+}
+
+/// Pick a theme to preview in place of the campaign's.
+fn theme_section(ui: &mut egui::Ui, choice: &mut ThemeChoice) {
+    let themes = themes();
+    let name = |pick: Option<usize>| pick.map_or("campaign", |i| themes[i].name);
+    let mut pick = choice.0;
+    egui::ComboBox::from_label("theme")
+        .selected_text(name(pick))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(&mut pick, None, name(None));
+            for i in 0..themes.len() {
+                ui.selectable_value(&mut pick, Some(i), name(Some(i)));
+            }
+        });
+    // Only a real change redraws the level.
+    if pick != choice.0 {
+        choice.0 = pick;
+    }
 }
 
 fn light_section(ui: &mut egui::Ui, panel: &mut LightPanel) {

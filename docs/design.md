@@ -388,10 +388,29 @@ output is committed; the game only ever loads level files.
   theme return as red does, yellow once red and green are back. Only the
   world (walls, scenery, background) is filtered: the hero, enemies, pickups
   and phantoms keep their colours, so an enemy's colour always reads.
-- **Themes follow the campaign order**, a few levels per theme, so each
-  stretch of the campaign feels like its own world. A theme sets its wall
-  materials, palette, background colour and, later, background layers and
-  props.
+- **Themes follow the campaign order**, three levels per theme, so each
+  stretch of the campaign feels like its own world; levels past the last
+  theme keep it, and a single level or the dev levels use the first. A
+  theme sets its wall and panel styles, palette, background colour and,
+  later, background layers and props. Its background colour goes through
+  the same filter as its art, so it starts grey too. In the dev panel,
+  **Next level** steps through the campaign and the **theme** picker
+  redraws the current level in any theme, to check each one.
+  - **Quarry** (levels 1–3): sandstone blocks with moss and grass, blue
+    crystal, leaded-glass panels and a blue-grey night. Mostly warm, so red
+    brings the stone back, green the moss and blue the crystal.
+  - **Crystal Caverns** (4–6): rough rock with worn edges, cracks and
+    strata, stalactites under ledges and glowing fungus on top, cyan and
+    magenta crystal, geode panels whose agate bands follow each panel's
+    shape, and a teal-black background. Mostly cool, so the secondaries
+    these levels bring in have something to light up.
+  - **Observatory** (7–9): pale veined marble with gold trim on top,
+    carved dentils underneath and gold and lapis inlays; stained-glass
+    panels in every hue with a rose window, a star or a crescent moon; and
+    deep indigo. Each pane returns with its own hue, and a panel's hue only
+    tints it lightly, so the richest scene comes once everything is back.
+  - **Foundry** (10–12, later): dark iron plates and rivets with glowing
+    seams, and gratings for panels.
 - **Sprites** for the hero, enemies, orbs, pickups and the prism are drawn
   in white and greys and tinted in the game, so one sheet serves every
   colour. The hero's surface turns with its spin while its highlight stays
@@ -463,7 +482,7 @@ output is committed; the game only ever loads level files.
 | 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
 | 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |
-| 7b | Themes | More themes following the campaign order, each with its own background colour. |
+| 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
 | 7c | Sprites | Generated, animated sprites for the hero, enemies, orbs, pickups and the prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
 | 8 | Game loop | Menus, game over, score, music, audio settings. Pause is done. |

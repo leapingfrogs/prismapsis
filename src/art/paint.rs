@@ -18,40 +18,138 @@ use std::f64::consts::TAU;
 /// An sRGB colour, each channel 0 to 1.
 pub type Rgb = [f32; 3];
 
-/// What a theme's walls are made of.
+/// How a theme's walls are built.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WallStyle {
+    /// Staggered blocks with straight edges, grass on top.
+    Blocks,
+    /// Rough rock with worn edges, cracks and strata, glowing fungus on top
+    /// and stalactites underneath.
+    Rock,
+    /// Veined marble blocks with gold trim on top and carved dentils
+    /// underneath.
+    Marble,
+}
+
+/// How a theme's scenery panels are made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanelStyle {
+    /// A stone frame round leaded glass.
+    Leaded,
+    /// A rough rind round agate bands, with sparkling crystal inside.
+    Geode,
+    /// A gilt frame round stained glass in many colours.
+    Stained,
+}
+
+/// What a theme's walls and scenery are made of.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Theme {
     /// The folder under `assets/art` its tilesets go in.
     pub name: &'static str,
     pub seed: u32,
-    /// Block colours, light to dark; the darkest is kept for variants, as
+    pub walls: WallStyle,
+    pub panels: PanelStyle,
+    /// Wall colours, light to dark; the darkest is kept for variants, as
     /// any pattern in the plain tile repeats with every tile.
     pub stone: [Rgb; 3],
+    /// Mortar between blocks, or cracks in rock.
     pub mortar: Rgb,
-    /// Moss on top surfaces, dark and light.
+    /// Moss or fungus on top surfaces, dark and light.
     pub moss: [Rgb; 2],
-    /// Crystal set into some blocks, dark and light.
-    pub crystal: [Rgb; 2],
-    /// The glass in scenery panels, kept pale so a panel's own hue tints
-    /// it; panes vary between the two.
+    /// Two kinds of crystal set into the walls, each dark and light.
+    pub crystal: [[Rgb; 2]; 2],
+    /// Scenery panels' glass or agate, kept pale so a panel's own hue tints
+    /// it; panes and bands vary between the two.
     pub glass: [Rgb; 2],
-    /// Behind the level, for previews.
+    /// Stained glass colours, for stained panels.
+    pub panes: &'static [Rgb],
+    /// Behind the level.
     pub backdrop: Rgb,
 }
+
+impl Theme {
+    /// How strongly a cell's hue tints this theme's `kind` of art: pale
+    /// glass takes its hue strongly, stained glass only a little, so its own
+    /// colours still show.
+    #[must_use]
+    pub const fn hue_tint(&self, kind: Kind) -> f32 {
+        match (kind, self.panels) {
+            (Kind::Walls, _) => 0.6,
+            (Kind::Panels, PanelStyle::Stained) => 0.35,
+            (Kind::Panels, _) => 0.9,
+        }
+    }
+}
+
+/// How many campaign levels share a theme.
+pub const LEVELS_PER_THEME: usize = 3;
 
 /// Every theme, in campaign order.
 #[must_use]
 pub fn themes() -> Vec<Theme> {
-    vec![Theme {
-        name: "quarry",
-        seed: 1,
-        stone: [[0.86, 0.66, 0.46], [0.72, 0.5, 0.36], [0.6, 0.33, 0.27]],
-        mortar: [0.3, 0.23, 0.22],
-        moss: [[0.3, 0.55, 0.2], [0.58, 0.8, 0.3]],
-        crystal: [[0.25, 0.45, 0.9], [0.75, 0.9, 1.0]],
-        glass: [[0.33, 0.3, 0.27], [0.42, 0.44, 0.47]],
-        backdrop: [0.07, 0.07, 0.12],
-    }]
+    let blue = [[0.25, 0.45, 0.9], [0.75, 0.9, 1.0]];
+    vec![
+        Theme {
+            name: "quarry",
+            seed: 1,
+            walls: WallStyle::Blocks,
+            panels: PanelStyle::Leaded,
+            stone: [[0.86, 0.66, 0.46], [0.72, 0.5, 0.36], [0.6, 0.33, 0.27]],
+            mortar: [0.3, 0.23, 0.22],
+            moss: [[0.3, 0.55, 0.2], [0.58, 0.8, 0.3]],
+            crystal: [blue, blue],
+            glass: [[0.33, 0.3, 0.27], [0.42, 0.44, 0.47]],
+            panes: &[],
+            backdrop: [0.07, 0.07, 0.12],
+        },
+        Theme {
+            name: "caverns",
+            seed: 2,
+            walls: WallStyle::Rock,
+            panels: PanelStyle::Geode,
+            stone: [[0.5, 0.5, 0.6], [0.36, 0.36, 0.47], [0.24, 0.22, 0.33]],
+            mortar: [0.13, 0.12, 0.18],
+            moss: [[0.12, 0.38, 0.4], [0.5, 1.0, 0.85]],
+            crystal: [
+                [[0.1, 0.6, 0.72], [0.7, 1.0, 1.0]],
+                [[0.62, 0.16, 0.66], [1.0, 0.68, 1.0]],
+            ],
+            glass: [[0.3, 0.33, 0.38], [0.48, 0.53, 0.58]],
+            panes: &[],
+            backdrop: [0.03, 0.08, 0.09],
+        },
+        Theme {
+            name: "observatory",
+            seed: 3,
+            walls: WallStyle::Marble,
+            panels: PanelStyle::Stained,
+            stone: [[0.93, 0.91, 0.88], [0.8, 0.79, 0.8], [0.56, 0.54, 0.62]],
+            mortar: [0.5, 0.48, 0.54],
+            moss: [[0.7, 0.5, 0.16], [1.0, 0.86, 0.42]],
+            crystal: [
+                [[0.7, 0.5, 0.16], [1.0, 0.86, 0.42]],
+                [[0.14, 0.2, 0.58], [0.4, 0.52, 0.95]],
+            ],
+            glass: [[0.6, 0.55, 0.4], [0.9, 0.85, 0.65]],
+            panes: &[
+                [0.62, 0.14, 0.16],
+                [0.72, 0.48, 0.1],
+                [0.2, 0.5, 0.2],
+                [0.12, 0.45, 0.5],
+                [0.16, 0.22, 0.6],
+                [0.42, 0.18, 0.55],
+            ],
+            backdrop: [0.06, 0.05, 0.16],
+        },
+    ]
+}
+
+/// The theme for a level at `position` in the campaign: a few levels each,
+/// staying on the last theme after they run out.
+#[must_use]
+pub fn theme_index(position: usize) -> usize {
+    (position / LEVELS_PER_THEME).min(themes().len() - 1)
 }
 
 /// The tilesets each theme has, each a set of 16 corner tiles and the
@@ -72,16 +170,6 @@ impl Kind {
         match self {
             Self::Walls => "walls",
             Self::Panels => "panels",
-        }
-    }
-
-    /// How strongly a cell's hue tints this art: panels are pale glass, so
-    /// their hue shows strongly.
-    #[must_use]
-    pub const fn hue_tint(self) -> f32 {
-        match self {
-            Self::Walls => 0.6,
-            Self::Panels => 0.9,
         }
     }
 }
@@ -175,6 +263,10 @@ const FAR: f64 = 1e3;
 /// A panel's stone frame, and the shadow it casts on the glass inside.
 const FRAME: f64 = 6.0;
 const INSET: f64 = 8.0;
+/// Depth of the agate bands inside a geode.
+const AGATE: f64 = 22.0;
+/// Depth of the gold trim along marble tops.
+const TRIM: f64 = 4.0;
 /// Glass panes are diamonds; this is the spacing of their diagonal leads
 /// along each axis, which must divide the tile so panes repeat every tile.
 const PANE: f64 = 20.0;
@@ -184,7 +276,18 @@ struct Painter<'a> {
     theme: &'a Theme,
     grain: Fbm<Perlin>,
     moss: Fbm<Perlin>,
+    /// Rock's worn edges and cracks.
+    wear: Fbm<Perlin>,
 }
+
+/// Where crystals sit in a cluster, as (x, y, size) from the tile centre.
+const CLUSTER: [(f64, f64, f64); 3] = [(-6.0, 4.0, 10.0), (8.0, -2.0, 13.0), (2.0, 12.0, 7.0)];
+const CLUSTER_MIRRORED: [(f64, f64, f64); 4] = [
+    (7.0, 5.0, 12.0),
+    (-8.0, -3.0, 14.0),
+    (-1.0, 13.0, 8.0),
+    (12.0, -10.0, 7.0),
+];
 
 /// Each quarter of a tile: its mask bit and which side of the centre it's on.
 const QUARTERS: [(u8, bool, bool); 4] = [
@@ -229,6 +332,10 @@ const fn opaque([r, g, b]: Rgb) -> [f32; 4] {
     [r, g, b, 1.0]
 }
 
+const fn translucent([r, g, b]: Rgb, alpha: f32) -> [f32; 4] {
+    [r, g, b, alpha]
+}
+
 fn lerp(a: Rgb, b: Rgb, t: f32) -> Rgb {
     [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t)
 }
@@ -250,6 +357,16 @@ impl<'a> Painter<'a> {
             theme,
             grain: Fbm::<Perlin>::new(theme.seed).set_octaves(4),
             moss: Fbm::<Perlin>::new(theme.seed.wrapping_add(1)).set_octaves(3),
+            wear: Fbm::<Perlin>::new(theme.seed.wrapping_add(2)).set_octaves(3),
+        }
+    }
+
+    /// How far a rough edge is worn back from the cell's edge, in pixels.
+    fn worn(&self, x: f64, y: f64, rough: bool) -> f64 {
+        if rough {
+            f64::from(Self::periodic(&self.wear, x, y, 9.0) + 0.6).max(0.0) * 7.0
+        } else {
+            0.0
         }
     }
 
@@ -268,21 +385,106 @@ impl<'a> Painter<'a> {
         for py in 0..TILE_PX {
             for px in 0..TILE_PX {
                 let (x, y) = (f64::from(px) + 0.5, f64::from(py) + 0.5);
-                let open = mask & quarter_bit(x, y) == 0;
-                let pixel = match (kind, open) {
-                    (Kind::Walls, true) => self.open(x, y, mask),
-                    (Kind::Walls, false) => opaque(self.solid(x, y, mask, variant)),
-                    (Kind::Panels, true) => [0.0; 4],
-                    (Kind::Panels, false) => opaque(self.panel(x, y, mask, variant)),
+                let rough = match kind {
+                    Kind::Walls => self.theme.walls == WallStyle::Rock,
+                    Kind::Panels => self.theme.panels == PanelStyle::Geode,
+                };
+                // Distance in from the (worn) edge; open space is below zero.
+                let edge = if mask & quarter_bit(x, y) == 0 {
+                    -1.0
+                } else {
+                    distance_to(x, y, mask, false) - self.worn(x, y, rough)
+                };
+                let pixel = match (kind, edge >= 0.0) {
+                    (Kind::Walls, false) => self.open(x, y, mask),
+                    (Kind::Walls, true) => opaque(self.solid(x, y, mask, edge, variant)),
+                    (Kind::Panels, false) => [0.0; 4],
+                    (Kind::Panels, true) => opaque(self.panel(x, y, mask, edge, variant)),
                 };
                 canvas.set(px, top + py, pixel);
             }
         }
     }
 
+    /// Open space beside a wall, by the theme's style.
+    fn open(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+        match self.theme.walls {
+            WallStyle::Blocks => self.grass_and_shadow(x, y, mask),
+            WallStyle::Rock => self.fungus_and_stalactites(x, y, mask),
+            WallStyle::Marble => self.dentils_and_shadow(x, y, mask),
+        }
+    }
+
+    /// Under a ledge: a row of carved dentils, then a soft shadow. Above a
+    /// floor, nothing.
+    #[allow(clippy::cast_possible_truncation)]
+    fn dentils_and_shadow(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+        if mask & bit_across(x, y) == 0 || y < CENTRE {
+            return [0.0; 4];
+        }
+        let down = y - CENTRE;
+        if down < 5.0 && x.rem_euclid(10.0) < 6.0 {
+            let lit = if x.rem_euclid(10.0) < 1.5 { 1.1 } else { 0.85 };
+            return opaque(scale(
+                self.theme.stone[1],
+                lit * (0.95 - 0.04 * down as f32),
+            ));
+        }
+        let depth = (down / 16.0).min(1.0);
+        [0.0, 0.0, 0.0, (0.5 * (1.0 - depth).powi(2)) as f32]
+    }
+
+    /// Glowing fungus growing up from a floor, or stalactites and shadow
+    /// under a ledge. Rock is worn back from its cell, so both start a
+    /// little inside it.
+    #[allow(clippy::cast_possible_truncation)]
+    fn fungus_and_stalactites(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+        let theme = self.theme;
+        let solid = |y: f64| mask & quarter_bit(x, y) != 0;
+        let (above, below) = (solid(CENTRE - 1.0), solid(CENTRE + 1.0));
+        if below && !above && y < CENTRE + 4.0 {
+            // A few mushrooms along the floor, a stem and a glowing cap.
+            let column = (x / 10.0).floor();
+            let roll = f64::from(unit(theme.seed, column as i64, 11));
+            if roll > 0.5 {
+                return [0.0; 4];
+            }
+            let (height, cap) = (3.0 + 16.0 * roll, 2.0 + 5.0 * roll);
+            let up = CENTRE + 3.0 - y;
+            let dx = x - (column * 10.0 + 5.0);
+            let reach = dx.hypot(up - height);
+            if reach < cap && up >= height - 1.0 {
+                return opaque(theme.moss[1]);
+            }
+            if dx.abs() < 1.0 && (0.0..height).contains(&up) {
+                return opaque(lerp(theme.moss[0], theme.moss[1], 0.4));
+            }
+            if reach < cap + 4.0 {
+                return translucent(theme.moss[1], (0.3 * (1.0 - (reach - cap) / 4.0)) as f32);
+            }
+            return [0.0; 4];
+        }
+        if above && !below && y > CENTRE - 6.0 {
+            // Stalactites hanging from the ledge, lit on their left.
+            let column = (x / 8.0).floor();
+            let roll = f64::from(unit(theme.seed, column as i64, 13));
+            let (length, width) = (4.0 + 24.0 * roll * roll, 1.5 + 2.5 * roll);
+            let down = y - (CENTRE - 5.0);
+            let dx = x - (column * 8.0 + 4.0);
+            if down < length && dx.abs() < width * (1.0 - down / length) {
+                let fade = (0.95 - 0.4 * down / length) as f32;
+                let lit = if dx < 0.0 { 1.15 } else { 0.85 };
+                return opaque(scale(theme.stone[1], fade * lit));
+            }
+            let depth = ((y - CENTRE) / 16.0).clamp(0.0, 1.0);
+            return [0.0, 0.0, 0.0, (0.5 * (1.0 - depth).powi(2)) as f32];
+        }
+        [0.0; 4]
+    }
+
     /// Open space: grass poking up from a floor below, or the shadow under a
     /// ledge above. Otherwise clear.
-    fn open(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+    fn grass_and_shadow(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
         let across = mask & bit_across(x, y) != 0;
         if !across {
             return [0.0; 4];
@@ -305,21 +507,41 @@ impl<'a> Painter<'a> {
         [0.0, 0.0, 0.0, alpha]
     }
 
-    fn solid(&self, x: f64, y: f64, mask: u8, variant: u16) -> Rgb {
+    /// A wall pixel `edge` pixels in from its surface.
+    fn solid(&self, x: f64, y: f64, mask: u8, edge: f64, variant: u16) -> Rgb {
         let theme = self.theme;
+        let rock = theme.walls == WallStyle::Rock;
         let mut colour = self
             .decal(x, y, variant)
-            .unwrap_or_else(|| self.stone(x, y));
+            .unwrap_or_else(|| match theme.walls {
+                WallStyle::Blocks => self.stone(x, y),
+                WallStyle::Rock => self.rock(x, y),
+                WallStyle::Marble => self.marble(x, y),
+            });
 
-        let edge = distance_to(x, y, mask, false);
         // Deeper inside a wall is darker.
         #[allow(clippy::cast_possible_truncation)]
         let depth = ((edge - BEVEL) / (DEPTH - BEVEL)).clamp(0.0, 1.0) as f32;
         colour = scale(colour, 1.0 - 0.22 * depth);
 
-        // Moss along top surfaces: open space directly above.
-        if y >= CENTRE && mask & bit_across(x, y) == 0 {
+        let top = y >= CENTRE && mask & bit_across(x, y) == 0;
+        if top && theme.walls == WallStyle::Marble {
+            // A band of gold trim along top surfaces, brightest at the edge.
             let below_surface = y - CENTRE;
+            if below_surface < TRIM {
+                #[allow(clippy::cast_possible_truncation)]
+                let lit = (1.0 - below_surface / TRIM) as f32;
+                colour = lerp(theme.moss[0], theme.moss[1], lit);
+            } else if below_surface < TRIM + 1.0 {
+                colour = scale(theme.moss[0], 0.6);
+            }
+        } else if top {
+            // Moss along top surfaces: open space directly above.
+            let below_surface = if rock {
+                edge.max(y - CENTRE)
+            } else {
+                y - CENTRE
+            };
             let reach = 6.0 + 5.0 * f64::from(Self::periodic(&self.moss, x, 0.0, 6.0) + 1.0);
             if below_surface < reach {
                 let shade = Self::periodic(&self.moss, x, y, 10.0) * 0.5 + 0.5;
@@ -390,33 +612,43 @@ impl<'a> Painter<'a> {
 
     /// Details set into the solid variants, away from the tile's edges so
     /// they never break the join with a neighbour.
+    #[allow(clippy::cast_possible_truncation)]
     fn decal(&self, x: f64, y: f64, variant: u16) -> Option<Rgb> {
         let theme = self.theme;
         let (cx, cy) = (x - CENTRE, y - CENTRE);
-        match variant {
-            // A cluster of crystals, lit on their upper-left faces.
-            1 => [(-6.0, 4.0, 10.0), (8.0, -2.0, 13.0), (2.0, 12.0, 7.0)]
-                .iter()
-                .find_map(|&(ox, oy, size)| {
-                    let (dx, dy) = (cx - ox, cy - oy);
-                    let reach = dx.abs() + dy.abs() * 0.55;
-                    (reach < size * 0.55).then(|| {
-                        let lit = dx + dy < 0.0;
-                        let base = if lit {
-                            theme.crystal[1]
-                        } else {
-                            theme.crystal[0]
-                        };
-                        if reach > size * 0.45 {
-                            scale(base, 0.7)
-                        } else {
-                            base
-                        }
-                    })
-                }),
+        match (theme.walls, variant) {
+            // A gold rosette round a lapis centre.
+            (WallStyle::Marble, 1) => {
+                let radius = cx.hypot(cy);
+                let petals = (cy.atan2(cx) * 8.0).cos() * 3.0;
+                if radius < 6.0 {
+                    Some(theme.crystal[1][usize::from(radius < 3.0)])
+                } else if radius < 14.0 + petals {
+                    Some(lerp(
+                        theme.crystal[0][0],
+                        theme.crystal[0][1],
+                        0.5 + 0.5 * (-cx - cy) as f32 / 14.0,
+                    ))
+                } else {
+                    None
+                }
+            }
+            // A lapis diamond inlaid in a gold border.
+            (WallStyle::Marble, 2) => {
+                let reach = cx.abs() + cy.abs();
+                if reach < 13.0 {
+                    Some(theme.crystal[1][usize::from(cx + cy < 0.0)])
+                } else if reach < 16.0 {
+                    Some(theme.crystal[0][1])
+                } else {
+                    None
+                }
+            }
+            (_, 1) => Self::cluster(cx, cy, theme.crystal[0], &CLUSTER),
+            (WallStyle::Rock, 2) => Self::cluster(cx, cy, theme.crystal[1], &CLUSTER_MIRRORED),
             // A darker block with a crack running down and across it. The
             // block is the one wholly inside the tile, on the second row.
-            2 => {
+            (WallStyle::Blocks, 2) => {
                 let wobble = f64::from(Self::periodic(&self.grain, x, y, 5.0)) * 5.0;
                 let line = (cy - cx * 0.7 + wobble).abs();
                 if line < 1.4 && cx.abs() < 22.0 && cy.abs() < 22.0 {
@@ -427,39 +659,108 @@ impl<'a> Painter<'a> {
                 inside.then(|| lerp(self.stone(x, y), theme.stone[2], 0.75))
             }
             // A thin seam of crystal winding through.
-            3 => {
+            (_, 3) => {
+                let crystal = theme.crystal[usize::from(theme.walls == WallStyle::Rock)];
                 let wave = (x / 9.0).sin() * 5.0;
                 let seam = (cy - wave).abs();
-                (seam < 2.2 && cx.abs() < 26.0).then(|| {
-                    if seam < 0.9 {
-                        theme.crystal[1]
-                    } else {
-                        theme.crystal[0]
-                    }
-                })
+                (seam < 2.2 && cx.abs() < 26.0)
+                    .then(|| if seam < 0.9 { crystal[1] } else { crystal[0] })
             }
             _ => None,
         }
+    }
+
+    /// A cluster of crystals at `spots`, lit on their upper-left faces.
+    fn cluster(cx: f64, cy: f64, crystal: [Rgb; 2], spots: &[(f64, f64, f64)]) -> Option<Rgb> {
+        spots.iter().find_map(|&(ox, oy, size)| {
+            let (dx, dy) = (cx - ox, cy - oy);
+            let reach = dx.abs() + dy.abs() * 0.55;
+            (reach < size * 0.55).then(|| {
+                let base = if dx + dy < 0.0 {
+                    crystal[1]
+                } else {
+                    crystal[0]
+                };
+                if reach > size * 0.45 {
+                    scale(base, 0.7)
+                } else {
+                    base
+                }
+            })
+        })
+    }
+
+    /// Polished marble: tall staggered blocks with fine joints, faint veins,
+    /// and a sheen towards each block's top.
+    #[allow(clippy::cast_possible_truncation)]
+    fn marble(&self, x: f64, y: f64) -> Rgb {
+        let theme = self.theme;
+        let row = (y / 40.0).floor();
+        let offset = if row.rem_euclid(2.0) == 0.0 {
+            0.0
+        } else {
+            20.0
+        };
+        let along = (x + offset).rem_euclid(f64::from(TILE_PX));
+        let (lx, ly) = (along % 40.0, y % 40.0);
+        if lx < 1.5 || ly < 1.5 {
+            return theme.mortar;
+        }
+        let block = ((along / 40.0).floor() as i64, row.rem_euclid(2.0) as i64);
+        let mut colour = lerp(
+            theme.stone[0],
+            theme.stone[1],
+            0.6 * unit(theme.seed, block.0, block.1),
+        );
+        let vein = Self::periodic(&self.wear, x, y, 3.0).abs();
+        if vein < 0.025 {
+            colour = lerp(colour, theme.stone[2], 0.35 * (1.0 - vein / 0.025));
+        }
+        scale(colour, 1.06 - 0.08 * (ly / 40.0) as f32)
+    }
+
+    /// Rough rock: strata warped by noise, grain, and a network of cracks.
+    #[allow(clippy::cast_possible_truncation)]
+    fn rock(&self, x: f64, y: f64) -> Rgb {
+        let theme = self.theme;
+        if Self::periodic(&self.moss, x, y, 3.0).abs() < 0.012 {
+            return theme.mortar;
+        }
+        // Four bands a tile, so they repeat with it.
+        let warp = f64::from(Self::periodic(&self.grain, x, y, 3.0)) * 12.0;
+        let band = ((y + warp) / f64::from(TILE_PX) * TAU * 4.0).sin() as f32;
+        let mut colour = lerp(theme.stone[1], theme.stone[0], 0.5 + 0.35 * band);
+        colour = scale(colour, 1.0 + 0.14 * Self::periodic(&self.grain, x, y, 14.0));
+        colour
     }
 
     /// A panel: a raised stone frame round its edge and leaded glass set
     /// back inside it, shaded under the frame and glowing towards the
     /// middle.
     #[allow(clippy::cast_possible_truncation)]
-    fn panel(&self, x: f64, y: f64, mask: u8, variant: u16) -> Rgb {
-        let edge = distance_to(x, y, mask, false);
+    fn panel(&self, x: f64, y: f64, mask: u8, edge: f64, variant: u16) -> Rgb {
         let facing = Self::facing(x, y, mask);
         if edge < FRAME {
             let rim = (1.0 - edge / FRAME) as f32;
             let grain = Self::periodic(&self.grain, x, y, 8.0);
+            let body = match self.theme.panels {
+                PanelStyle::Leaded => self.theme.stone[1],
+                PanelStyle::Geode => self.rock(x, y),
+                PanelStyle::Stained => scale(self.theme.moss[1], 1.6),
+            };
             let frame = scale(
-                self.theme.stone[1],
+                body,
                 0.45 * (1.0 + 0.6 * rim * facing) * (1.0 + 0.1 * grain),
             );
             return if edge < 1.5 { scale(frame, 0.6) } else { frame };
         }
         let depth = ((edge - FRAME) / (DEPTH - FRAME)).clamp(0.0, 1.0) as f32;
-        let mut colour = scale(self.glass(x, y, variant), 0.8 + 0.2 * depth);
+        let inside = match self.theme.panels {
+            PanelStyle::Leaded => self.glass(x, y, variant),
+            PanelStyle::Geode => self.geode(x, y, edge - FRAME, variant),
+            PanelStyle::Stained => self.stained(x, y, variant),
+        };
+        let mut colour = scale(inside, 0.8 + 0.2 * depth);
         // The frame shades the glass below its top edge; light catches the
         // glass above its bottom edge.
         if edge < FRAME + INSET {
@@ -470,6 +771,154 @@ impl<'a> Painter<'a> {
             );
         }
         colour
+    }
+
+    /// Inside a geode, `inner` pixels in from its rind: agate bands that
+    /// follow the panel's shape, then sparkling crystal in the hollow, with
+    /// a motif in each variant kept clear of the tile's edges.
+    #[allow(clippy::cast_possible_truncation)]
+    fn geode(&self, x: f64, y: f64, inner: f64, variant: u16) -> Rgb {
+        let theme = self.theme;
+        let (cx, cy) = (x - CENTRE, y - CENTRE);
+        let radius = cx.hypot(cy);
+        let wobble = f64::from(Self::periodic(&self.wear, x, y, 6.0)) * 2.0;
+        let agate = |depth: f64| {
+            let band = (0.5 + 0.5 * ((depth + wobble) * 0.55).sin()) as f32;
+            scale(
+                lerp(
+                    scale(theme.glass[0], 0.65),
+                    scale(theme.glass[1], 1.2),
+                    band,
+                ),
+                1.0 - (0.25 * depth / AGATE) as f32,
+            )
+        };
+        if inner < AGATE {
+            return agate(inner);
+        }
+        match variant {
+            // A cluster of bright crystal points.
+            1 => {
+                if let Some(c) = Self::cluster(cx, cy, theme.glass, &CLUSTER) {
+                    return scale(c, 1.4);
+                }
+            }
+            // A ring of agate round a knot in the middle.
+            2 if radius < 24.0 => return agate(24.0 - radius),
+            // A dark hollow with a lit lower rim.
+            3 if radius < 14.0 => {
+                let rim = if radius > 12.0 && cy > 0.0 { 2.5 } else { 0.5 };
+                return scale(theme.mortar, rim);
+            }
+            _ => {}
+        }
+        // The hollow: dim crystal, softly shaded, with a few glints.
+        let (column, row) = ((x / 8.0).floor(), (y / 8.0).floor());
+        #[allow(clippy::cast_possible_truncation)]
+        let roll = unit(
+            theme.seed.wrapping_add(4),
+            column.rem_euclid(10.0) as i64,
+            row.rem_euclid(10.0) as i64,
+        );
+        let (dx, dy) = (x - column * 8.0 - 4.0, y - row * 8.0 - 4.0);
+        if roll > 0.94 && dx.abs() * dy.abs() < 1.0 && dx.abs() + dy.abs() < 3.5 {
+            return scale(theme.glass[1], 1.5);
+        }
+        let shade = Self::periodic(&self.grain, x, y, 5.0) * 0.5 + 0.5;
+        lerp(
+            scale(theme.glass[0], 0.5),
+            scale(theme.glass[1], 0.7),
+            shade,
+        )
+    }
+
+    /// Stained glass: irregular panes in the theme's colours between leads,
+    /// with a rose window, a star or a crescent moon in the variants.
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    fn stained(&self, x: f64, y: f64, variant: u16) -> Rgb {
+        let theme = self.theme;
+        let (cx, cy) = (x - CENTRE, y - CENTRE);
+        let radius = cx.hypot(cy);
+        let lead = scale(theme.mortar, 0.35);
+        let pane = |pick: f32| {
+            let i = (pick * theme.panes.len() as f32) as usize;
+            theme.panes[i.min(theme.panes.len() - 1)]
+        };
+        match variant {
+            // A rose window: a ring of petals round a gold centre.
+            1 if radius < 28.0 => {
+                let angle = cy.atan2(cx).rem_euclid(TAU);
+                let petal = (angle / (TAU / 12.0)).floor();
+                let within = angle - (petal + 0.5) * TAU / 12.0;
+                if (radius - 27.0).abs() < LEAD || (radius - 11.0).abs() < LEAD {
+                    return lead;
+                }
+                if radius < 11.0 {
+                    return theme.glass[1];
+                }
+                if (radius * within.sin()).abs() > radius * (TAU / 24.0).sin() - LEAD {
+                    return lead;
+                }
+                return pane(unit(theme.seed, petal as i64 % 3, 5));
+            }
+            // An eight-pointed gold star.
+            2 => {
+                let angle = cy.atan2(cx);
+                let point = 7.0 + 15.0 * (angle * 4.0).cos().abs().powi(6);
+                if radius < point - LEAD {
+                    return lerp(
+                        theme.glass[0],
+                        theme.glass[1],
+                        (1.0 - radius / point) as f32,
+                    );
+                }
+                if radius < point + LEAD * 0.5 {
+                    return lead;
+                }
+            }
+            // A pale crescent moon.
+            3 if radius < 17.0 => {
+                let shadow = (cx - 7.0).hypot(cy + 4.0);
+                if radius > 15.5 || (shadow - 14.0).abs() < LEAD {
+                    return lead;
+                }
+                if shadow > 14.0 {
+                    return theme.glass[1];
+                }
+            }
+            _ => {}
+        }
+        // Panes are the cells round jittered points, four by four a tile,
+        // wrapping so they repeat with it.
+        let (gx, gy) = ((x / 20.0).floor(), (y / 20.0).floor());
+        let mut near = [(f64::MAX, (0, 0)); 2];
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let (cell_x, cell_y) = (gx + f64::from(dx), gy + f64::from(dy));
+                let id = (cell_x.rem_euclid(4.0) as i64, cell_y.rem_euclid(4.0) as i64);
+                let jitter = |salt| 3.0 + 14.0 * f64::from(unit(theme.seed, id.0 * 7 + salt, id.1));
+                let (px, py) = (cell_x * 20.0 + jitter(1), cell_y * 20.0 + jitter(2));
+                let d = (x - px).hypot(y - py);
+                if d < near[0].0 {
+                    near[1] = near[0];
+                    near[0] = (d, id);
+                } else if d < near[1].0 {
+                    near[1] = (d, id);
+                }
+            }
+        }
+        if near[1].0 - near[0].0 < LEAD * 1.4 {
+            return lead;
+        }
+        let (id_x, id_y) = near[0].1;
+        let mut colour = pane(unit(theme.seed.wrapping_add(6), id_x, id_y));
+        colour = scale(colour, 1.0 + 0.12 * Self::periodic(&self.grain, x, y, 6.0));
+        // Glass is brighter at each pane's heart.
+        scale(colour, 1.15 - 0.02 * near[0].0.min(10.0) as f32)
     }
 
     /// Leaded glass: staggered panes, with a motif in each variant kept
@@ -599,7 +1048,8 @@ pub fn preview(theme: &Theme, map: &[&str]) -> Canvas {
                     let mut over = linear([r, g, b]);
                     if tinted {
                         let own = cell(i64::from(px / TILE_PX), i64::from(py / TILE_PX));
-                        let tint = super::tint(own.and_then(panel_hue), Kind::Panels.hue_tint());
+                        let tint =
+                            super::tint(own.and_then(panel_hue), theme.hue_tint(Kind::Panels));
                         over = [0, 1, 2].map(|i| over[i] * tint[i]);
                     }
                     let over = filtered(over, *wash);
@@ -717,9 +1167,15 @@ mod tests {
 
     #[test]
     fn panels_sit_back_behind_walls() {
+        for theme in themes() {
+            panels_sit_back_in(&theme);
+        }
+    }
+
+    fn panels_sit_back_in(theme: &Theme) {
         // Average brightness of the filled parts of every tile.
         let brightness = |kind| {
-            let tiles = tileset(&theme(), kind);
+            let tiles = tileset(theme, kind);
             let filled: Vec<f32> = tiles
                 .pixels
                 .iter()
@@ -731,9 +1187,9 @@ mod tests {
             filled.iter().sum::<f32>() / count
         };
         let (p, w) = (brightness(Kind::Panels), brightness(Kind::Walls));
-        assert!(p < w * 0.75, "{p} {w}");
+        assert!(p < w * 0.75, "{}: {p} {w}", theme.name);
         // Open space around a panel is clear: no grass or shadows.
-        let panels = tileset(&theme(), Kind::Panels);
+        let panels = tileset(theme, Kind::Panels);
         let floor = u32::from(BOTTOM_LEFT | BOTTOM_RIGHT) * TILE_PX;
         assert!((0..TILE_PX).all(|x| panels.get(x, floor + 20)[3] == 0.0));
     }
@@ -808,6 +1264,52 @@ mod tests {
         assert!(saturation(0) < 0.01);
         assert!(saturation(3) > saturation(1));
         assert!(saturation(1) > saturation(0));
+    }
+
+    #[test]
+    fn themes_last_a_few_levels_each_in_order() {
+        let positions: Vec<usize> = (0..7).map(theme_index).collect();
+        assert_eq!(positions, [0, 0, 0, 1, 1, 1, 2.min(themes().len() - 1)]);
+        assert_eq!(theme_index(100), themes().len() - 1);
+        let names: Vec<_> = themes().iter().map(|t| t.name).collect();
+        assert_eq!(&names[..2], ["quarry", "caverns"]);
+    }
+
+    #[test]
+    fn marble_tops_are_trimmed_in_gold() {
+        let observatory = themes()[2];
+        let tiles = tileset(&observatory, Kind::Walls);
+        let floor = u32::from(BOTTOM_LEFT | BOTTOM_RIGHT) * TILE_PX;
+        let gold = crate::art::hue_degrees(observatory.moss[1]);
+        let [r, g, b, _] = tiles.get(TILE_PX / 3, floor + TILE_PX / 2 + 2);
+        assert!((crate::art::hue_degrees([r, g, b]) - gold).abs() < 10.0);
+        // Deeper in, it's pale marble again.
+        let [r, g, b, _] = tiles.get(TILE_PX / 3, floor + TILE_PX - 10);
+        assert!(r.max(g).max(b) - r.min(g).min(b) < 0.15);
+    }
+
+    #[test]
+    fn rock_is_worn_and_holds_both_crystals() {
+        let caverns = themes()[1];
+        let tiles = tileset(&caverns, Kind::Walls);
+        // Along a floor's surface, some of the solid side is worn away.
+        let floor = u32::from(BOTTOM_LEFT | BOTTOM_RIGHT) * TILE_PX;
+        let worn = (0..TILE_PX)
+            .filter(|&x| tiles.get(x, floor + TILE_PX / 2 + 1)[3] < 1.0)
+            .count();
+        assert!(worn > 5 && worn < TILE_PX as usize, "{worn} worn");
+        // Variants 1 and 2 hold the two kinds of crystal.
+        // Crystal is shaded like the rest of the wall, so look for strong
+        // colour of its hue.
+        let holds = |layer: u16, colour: Rgb| {
+            let hue = crate::art::hue_degrees(colour);
+            tile(&tiles, layer).iter().any(|&[r, g, b, _]| {
+                let strong = r.max(g).max(b) - r.min(g).min(b) > 0.3;
+                strong && (crate::art::hue_degrees([r, g, b]) - hue).abs() < 15.0
+            })
+        };
+        assert!(holds(16, caverns.crystal[0][0]));
+        assert!(holds(17, caverns.crystal[1][0]));
     }
 
     #[test]

@@ -4,13 +4,15 @@
 //! around it are filled, drawn through a shader that holds back each hue
 //! until it has been restored.
 
-use super::paint::Kind;
+use super::filtered;
+use super::paint::{Kind, Theme, linear, theme_index, themes};
 use super::{BOTTOM_LEFT, BOTTOM_RIGHT, LAYERS, TOP_LEFT, TOP_RIGHT, layer, tint, variant_at};
-use crate::level::{CurrentLevel, LevelGeometry, Scenery, Solid};
+use crate::level::{Campaign, CurrentLevel, LevelGeometry, Scenery, Solid};
 use crate::light::{Hue, Phantom, Shade};
 use crate::physics::Aabb;
 use crate::spectrum_view::Wash;
 use bevy::asset::{RenderAssetUsages, embedded_asset, embedded_path};
+use bevy::ecs::system::SystemParam;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -18,9 +20,21 @@ use bevy::render::render_resource::AsBindGroup;
 use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 
-/// The first theme's tilesets, painted by `just art`.
-const WALLS_PNG: &[u8] = include_bytes!("../../assets/art/quarry/walls.png");
-const PANELS_PNG: &[u8] = include_bytes!("../../assets/art/quarry/panels.png");
+/// Each theme's walls and panels, painted by `just art`, in campaign order.
+const TILESETS: [[&[u8]; 2]; 3] = [
+    [
+        include_bytes!("../../assets/art/quarry/walls.png"),
+        include_bytes!("../../assets/art/quarry/panels.png"),
+    ],
+    [
+        include_bytes!("../../assets/art/caverns/walls.png"),
+        include_bytes!("../../assets/art/caverns/panels.png"),
+    ],
+    [
+        include_bytes!("../../assets/art/observatory/walls.png"),
+        include_bytes!("../../assets/art/observatory/panels.png"),
+    ],
+];
 
 /// Scenery is drawn behind the walls.
 const PANEL_DEPTH: f32 = -1.0;
@@ -32,8 +46,17 @@ impl Plugin for TilesPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "world.wesl");
         app.add_plugins(Material2dPlugin::<WorldMaterial>::default())
+            .init_resource::<ThemeChoice>()
             .add_systems(Startup, load_tiles)
-            .add_systems(Update, (draw_wall_tiles, draw_panel_tiles, wash_tiles));
+            .add_systems(
+                Update,
+                (
+                    draw_wall_tiles,
+                    draw_panel_tiles,
+                    wash_tiles,
+                    tint_background,
+                ),
+            );
     }
 }
 
@@ -61,11 +84,49 @@ impl Material2d for WorldMaterial {
     }
 }
 
-/// The materials walls and scenery are drawn with.
+/// The materials walls and scenery are drawn with: each theme's walls and
+/// panels, in campaign order.
 #[derive(Resource, Debug)]
-pub struct Tilesets {
-    pub walls: Handle<WorldMaterial>,
-    pub panels: Handle<WorldMaterial>,
+pub struct Tilesets(pub Vec<[Handle<WorldMaterial>; 2]>);
+
+impl Tilesets {
+    /// The material for `kind` in theme `theme`.
+    fn material(&self, theme: usize, kind: Kind) -> Handle<WorldMaterial> {
+        self.0[theme][kind as usize].clone()
+    }
+}
+
+/// A theme picked in the dev panel to preview, in place of the campaign's.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ThemeChoice(pub Option<usize>);
+
+/// The theme of the level being played; levels outside a campaign use the
+/// first.
+fn current_theme(campaign: Option<&Campaign>) -> usize {
+    campaign.map_or(0, |c| theme_index(c.current))
+}
+
+/// The theme being drawn: the dev panel's choice, or the campaign's.
+#[derive(SystemParam)]
+struct ThemeInPlay<'w> {
+    campaign: Option<Res<'w, Campaign>>,
+    choice: Res<'w, ThemeChoice>,
+}
+
+impl ThemeInPlay<'_> {
+    fn index(&self) -> usize {
+        self.choice
+            .0
+            .unwrap_or_else(|| current_theme(self.campaign.as_deref()))
+    }
+
+    fn theme(&self) -> Theme {
+        themes()[self.index()]
+    }
+
+    fn changed(&self) -> bool {
+        self.choice.is_changed() || self.campaign.as_ref().is_some_and(Res::is_changed)
+    }
 }
 
 /// The entity holding the wall tiles' mesh.
@@ -118,9 +179,11 @@ fn load_tiles(
             tiles,
         })
     };
-    let walls = load(Kind::Walls, WALLS_PNG);
-    let panels = load(Kind::Panels, PANELS_PNG);
-    commands.insert_resource(Tilesets { walls, panels });
+    let themes = TILESETS
+        .iter()
+        .map(|&[walls, panels]| [load(Kind::Walls, walls), load(Kind::Panels, panels)])
+        .collect();
+    commands.insert_resource(Tilesets(themes));
 }
 
 /// Which cells are filled, and the tint each gives the art.
@@ -139,13 +202,19 @@ impl Cells {
     /// Rasterise `areas` (cell-aligned boxes in a room of `size`, with an
     /// optional hue each) onto the level grid, as `kind` art.
     #[must_use]
-    pub fn new(kind: Kind, size: Vec2, tile: f32, areas: &[(Aabb, Option<Hue>)]) -> Self {
+    pub fn new(
+        kind: Kind,
+        theme: &Theme,
+        size: Vec2,
+        tile: f32,
+        areas: &[(Aabb, Option<Hue>)],
+    ) -> Self {
         #[allow(clippy::cast_possible_truncation)]
         let cell = |v: f32| (v / tile).round() as i32;
         let (cols, rows) = (cell(size.x), cell(size.y));
         let mut filled = vec![None; usize::try_from(cols * rows).unwrap_or(0)];
         for &(aabb, hue) in areas {
-            let tint = tint(hue, kind.hue_tint());
+            let tint = tint(hue, theme.hue_tint(kind));
             for row in cell(aabb.min.y).max(0)..cell(aabb.max.y).min(rows) {
                 for col in cell(aabb.min.x).max(0)..cell(aabb.max.x).min(cols) {
                     if let Ok(i) = usize::try_from(row * cols + col) {
@@ -248,13 +317,14 @@ fn draw_wall_tiles(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     tilesets: Option<Res<Tilesets>>,
+    theme: ThemeInPlay,
     level: Res<CurrentLevel>,
     added: Query<(), (Added<Solid>, Without<Phantom>)>,
     walls: Query<(&Solid, Option<&Shade>), Without<Phantom>>,
     old: Query<Entity, With<WallMesh>>,
 ) {
     let Some(tilesets) = tilesets else { return };
-    if added.is_empty() {
+    if added.is_empty() && !theme.choice.is_changed() {
         return;
     }
     let walls: Vec<_> = walls
@@ -262,7 +332,7 @@ fn draw_wall_tiles(
         .map(|(s, shade)| (s.0, shade.map(|s| s.0)))
         .collect();
     let level = &level.0;
-    let cells = Cells::new(Kind::Walls, level.size, level.tile, &walls);
+    let cells = Cells::new(Kind::Walls, &theme.theme(), level.size, level.tile, &walls);
     replace_mesh(
         &mut commands,
         &old,
@@ -270,7 +340,7 @@ fn draw_wall_tiles(
             Name::new("Wall tiles"),
             WallMesh,
             Mesh2d(meshes.add(cells.mesh(level.tile))),
-            MeshMaterial2d(tilesets.walls.clone()),
+            MeshMaterial2d(tilesets.material(theme.index(), Kind::Walls)),
             Transform::default(),
         ),
     );
@@ -281,13 +351,14 @@ fn draw_panel_tiles(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     tilesets: Option<Res<Tilesets>>,
+    theme: ThemeInPlay,
     level: Res<CurrentLevel>,
     added: Query<(), Added<Scenery>>,
     scenery: Query<(&Scenery, Option<&Shade>)>,
     old: Query<Entity, With<PanelMesh>>,
 ) {
     let Some(tilesets) = tilesets else { return };
-    if added.is_empty() {
+    if added.is_empty() && !theme.choice.is_changed() {
         return;
     }
     let scenery: Vec<_> = scenery
@@ -295,7 +366,13 @@ fn draw_panel_tiles(
         .map(|(s, shade)| (s.0, shade.map(|s| s.0)))
         .collect();
     let level = &level.0;
-    let cells = Cells::new(Kind::Panels, level.size, level.tile, &scenery);
+    let cells = Cells::new(
+        Kind::Panels,
+        &theme.theme(),
+        level.size,
+        level.tile,
+        &scenery,
+    );
     replace_mesh(
         &mut commands,
         &old,
@@ -303,7 +380,7 @@ fn draw_panel_tiles(
             Name::new("Scenery panels"),
             PanelMesh,
             Mesh2d(meshes.add(cells.mesh(level.tile))),
-            MeshMaterial2d(tilesets.panels.clone()),
+            MeshMaterial2d(tilesets.material(theme.index(), Kind::Panels)),
             Transform::from_xyz(0.0, 0.0, PANEL_DEPTH),
         ),
     );
@@ -331,11 +408,27 @@ fn wash_tiles(
         return;
     }
     let [r, g, b] = wash.0;
-    for handle in [&tilesets.walls, &tilesets.panels] {
+    for handle in tilesets.0.iter().flatten() {
         if let Some(mut material) = materials.get_mut(handle) {
             material.wash = Vec4::new(r, g, b, 0.0);
         }
     }
+}
+
+/// The theme's background colour, through the same filter as its art.
+fn tint_background(wash: Res<Wash>, theme: ThemeInPlay, clear: Option<ResMut<ClearColor>>) {
+    let Some(mut clear) = clear else { return };
+    if !wash.is_changed() && !theme.changed() {
+        return;
+    }
+    clear.0 = background(theme.index(), wash.0);
+}
+
+/// A theme's background colour with `wash` of each primary restored.
+#[must_use]
+pub fn background(theme: usize, wash: [f32; 3]) -> Color {
+    let [r, g, b] = filtered(linear(themes()[theme].backdrop), wash);
+    Color::linear_rgb(r, g, b)
 }
 
 #[cfg(test)]
@@ -352,7 +445,13 @@ mod tests {
                 Some(Hue::Red),
             ),
         ];
-        Cells::new(Kind::Walls, Vec2::new(160.0, 120.0), 40.0, &walls)
+        Cells::new(
+            Kind::Walls,
+            &themes()[0],
+            Vec2::new(160.0, 120.0),
+            40.0,
+            &walls,
+        )
     }
 
     #[test]
@@ -411,14 +510,57 @@ mod tests {
     }
 
     #[test]
+    fn a_chosen_theme_redraws_the_level_and_background_in_it() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Mesh>()
+            .init_asset::<ColorMaterial>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(ClearColor(crate::BACKGROUND))
+            .add_plugins((crate::SimulationPlugin, crate::render::PresentationPlugin));
+        for _ in 0..3 {
+            app.update();
+        }
+        let walls_material = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<&MeshMaterial2d<WorldMaterial>, With<WallMesh>>()
+                .single(world)
+                .map_or_else(|e| panic!("{e}"), |m| m.0.clone())
+        };
+        let tileset =
+            |app: &App, theme: usize| app.world().resource::<Tilesets>().0[theme][0].clone();
+        assert_eq!(walls_material(&mut app), tileset(&app, 0));
+        app.world_mut().resource_mut::<ThemeChoice>().0 = Some(2);
+        app.update();
+        app.update();
+        assert_eq!(walls_material(&mut app), tileset(&app, 2));
+        let wash = app.world().resource::<Wash>().0;
+        assert_eq!(app.world().resource::<ClearColor>().0, background(2, wash));
+    }
+
+    #[test]
+    fn the_campaign_position_picks_the_theme_and_its_background() {
+        let mut campaign = Campaign::built_in();
+        assert_eq!(current_theme(None), 0);
+        assert_eq!(current_theme(Some(&campaign)), 0);
+        campaign.current = 3;
+        assert_eq!(current_theme(Some(&campaign)), 1);
+        // The background starts grey and takes the theme's colour.
+        let grey = background(1, [0.0; 3]).to_linear();
+        assert!((grey.red - grey.blue).abs() < 1e-6);
+        assert_ne!(background(1, [1.0; 3]), background(0, [1.0; 3]));
+    }
+
+    #[test]
     fn scenery_has_no_edge_at_the_room_border_and_shows_its_hue() {
         let blue = [(Aabb::new(Vec2::ZERO, Vec2::splat(40.0)), Some(Hue::Blue))];
         let size = Vec2::new(160.0, 120.0);
-        let panels = Cells::new(Kind::Panels, size, 40.0, &blue);
+        let panels = Cells::new(Kind::Panels, &themes()[0], size, 40.0, &blue);
         // Outside the room is empty for scenery, unlike walls.
         assert_eq!(panels.mask(0, 0), TOP_RIGHT);
         assert_eq!(panels.mask(4, 3), 0);
-        let walls = Cells::new(Kind::Walls, size, 40.0, &blue);
+        let walls = Cells::new(Kind::Walls, &themes()[0], size, 40.0, &blue);
         assert_eq!(walls.mask(0, 0), SOLID);
         // Pale glass takes its hue more strongly than stone.
         let (glass, stone) = (panels.tint(0, 0), walls.tint(0, 0));
@@ -427,7 +569,8 @@ mod tests {
 
     #[test]
     fn the_committed_tileset_loads_as_layers() {
-        for png in [WALLS_PNG, PANELS_PNG] {
+        assert_eq!(TILESETS.len(), themes().len(), "a tileset for every theme");
+        for png in TILESETS.iter().flatten() {
             let image = tileset_image(png).unwrap_or_else(|e| panic!("{e}"));
             assert_eq!(
                 image.texture_descriptor.size.depth_or_array_layers,
