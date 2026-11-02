@@ -14,12 +14,9 @@ pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            PreUpdate,
-            toggle_pause
-                .after(bevy::input::InputSystems)
-                .run_if(in_play),
-        );
+        // In Update, after every input has been read: touch buttons press
+        // their keys during PreUpdate, after the keyboard.
+        app.add_systems(Update, toggle_pause.run_if(in_play));
     }
 }
 

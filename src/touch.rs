@@ -873,4 +873,25 @@ mod tests {
         assert!(!keys(&app).pressed(KeyCode::Enter));
         assert_eq!(selected(&mut app), 0);
     }
+
+    #[test]
+    fn the_pause_button_pauses_and_resumes() {
+        let mut app = app();
+        app.add_plugins(crate::pause::PausePlugin);
+        spawn_button(
+            &mut app,
+            TouchButton::new(KeyCode::KeyP),
+            Vec2::new(900.0, 100.0),
+        );
+        app.update();
+        let paused = |app: &App| app.world().resource::<Time<Virtual>>().is_paused();
+        let tap = |app: &mut App, id| {
+            touch(app, id, TouchPhase::Started, Vec2::new(900.0, 100.0));
+            touch(app, id, TouchPhase::Ended, Vec2::new(900.0, 100.0));
+        };
+        tap(&mut app, 1);
+        assert!(paused(&app));
+        tap(&mut app, 2);
+        assert!(!paused(&app));
+    }
 }
