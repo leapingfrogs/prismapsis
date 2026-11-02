@@ -2,6 +2,11 @@
 // `art::filtered`: a pixel's hue decides how much colour it may show, and
 // the rest is pulled towards grey. Vertex colours carry a tint in rgb and
 // the tileset layer in alpha.
+//
+// Lights then brighten what's near them in their own colour, after the
+// filter, so a red beam tints a wall that is still grey. Each light is a
+// segment (a point when both ends meet) with a colour and a radius; how
+// strongly this art takes light is in `wash.w`.
 
 import bevy_sprite_render::mesh2d::vertex_output::VertexOutput;
 
@@ -9,7 +14,37 @@ import bevy_sprite_render::mesh2d::vertex_output::VertexOutput;
 @group(constants::MATERIAL_BIND_GROUP) @binding(1) var tiles: texture_2d_array<f32>;
 @group(constants::MATERIAL_BIND_GROUP) @binding(2) var tiles_sampler: sampler;
 
+struct Lights {
+    // Each light's ends: xy and zw.
+    segments: array<vec4<f32>, 8>,
+    // Each light's colour times its strength, and its radius in w.
+    colours: array<vec4<f32>, 8>,
+    count: u32,
+}
+
+@group(constants::MATERIAL_BIND_GROUP) @binding(3) var<uniform> lights: Lights;
+
+// The light reaching `p`: each light falls off smoothly to nothing at its
+// radius from the nearest point of its segment.
+fn light_at(p: vec2<f32>) -> vec3<f32> {
+    var total = vec3<f32>(0.0);
+    for (var i = 0u; i < min(lights.count, 8u); i = i + 1u) {
+        let segment = lights.segments[i];
+        let a = segment.xy;
+        let ab = segment.zw - a;
+        let t = clamp(dot(p - a, ab) / max(dot(ab, ab), 0.0001), 0.0, 1.0);
+        let d = distance(p, a + ab * t);
+        let colour = lights.colours[i];
+        let falloff = clamp(1.0 - d / max(colour.w, 1.0), 0.0, 1.0);
+        total = total + colour.rgb * falloff * falloff;
+    }
+    return total;
+}
+
 const LUMA: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+// How much light lifts a surface regardless of how bright it is.
+const LIFT: f32 = 0.05;
 
 fn hue_degrees(c: vec3<f32>) -> f32 {
     let top = max(c.r, max(c.g, c.b));
@@ -47,5 +82,10 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let colour = texel.rgb * in.color.rgb;
     let grey = vec3<f32>(dot(colour, LUMA));
     let shown = mix(grey, colour, allowance(hue_degrees(colour)));
-    return vec4<f32>(shown, texel.a);
+    // Light brightens what's there and lifts even dark surfaces a little,
+    // so a beam shows on shadowed rock.
+    let light = light_at(in.world_position.xy) * wash.w;
+    // Never past white: light brightens walls but doesn't make them glow.
+    let lit = min(shown + light * (shown + vec3<f32>(LIFT)), vec3<f32>(1.0));
+    return vec4<f32>(lit, texel.a);
 }

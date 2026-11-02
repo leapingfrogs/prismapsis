@@ -26,7 +26,7 @@ use bevy::image::{
 };
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
-use bevy::render::render_resource::AsBindGroup;
+use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 
@@ -96,6 +96,7 @@ impl Plugin for TilesPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "world.wesl");
         app.add_plugins(Material2dPlugin::<WorldMaterial>::default())
+            .init_resource::<WorldLights>()
             .init_resource::<ThemeChoice>()
             .add_systems(Startup, load_tiles)
             .add_systems(
@@ -110,6 +111,7 @@ impl Plugin for TilesPlugin {
                     draw_changing,
                     show_changing,
                     theme_changing,
+                    shine_lights,
                 ),
             )
             .add_systems(Startup, spawn_backdrop.after(load_tiles))
@@ -123,9 +125,13 @@ impl Plugin for TilesPlugin {
 /// Theme art drawn through the colour filter.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 pub struct WorldMaterial {
-    /// How far red, green and blue have been restored, 0 to 1.
+    /// How far red, green and blue have been restored, 0 to 1, and in `w`
+    /// how strongly this art takes light.
     #[uniform(0)]
     pub wash: Vec4,
+    /// The lights brightening what's near them.
+    #[uniform(3)]
+    pub lights: SceneLights,
     #[texture(1, dimension = "2d_array")]
     #[sampler(2)]
     pub tiles: Handle<Image>,
@@ -141,6 +147,79 @@ impl Material2d for WorldMaterial {
 
     fn alpha_mode(&self) -> AlphaMode2d {
         AlphaMode2d::Blend
+    }
+}
+
+/// Most lights shining on the world at once.
+pub const MAX_LIGHTS: usize = 8;
+
+/// The lights shining on the world, as the shader takes them.
+#[derive(ShaderType, Debug, Clone, Default, PartialEq)]
+pub struct SceneLights {
+    /// Each light's ends: the first in xy, the second in zw.
+    pub segments: [Vec4; MAX_LIGHTS],
+    /// Each light's colour times its strength, and its radius in w.
+    pub colours: [Vec4; MAX_LIGHTS],
+    pub count: u32,
+}
+
+/// One light on the world: a segment from `from` to `to` (a point if they
+/// meet), its colour times its strength, and how far it reaches.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorldLight {
+    pub from: Vec2,
+    pub to: Vec2,
+    pub colour: Vec3,
+    pub radius: f32,
+}
+
+impl SceneLights {
+    /// The first `MAX_LIGHTS` of `lights`.
+    #[must_use]
+    pub fn from_lights(lights: &[WorldLight]) -> Self {
+        let mut scene = Self::default();
+        for (i, light) in lights.iter().take(MAX_LIGHTS).enumerate() {
+            scene.segments[i] = Vec4::new(light.from.x, light.from.y, light.to.x, light.to.y);
+            scene.colours[i] = light.colour.extend(light.radius);
+        }
+        scene.count = u32::try_from(lights.len().min(MAX_LIGHTS)).unwrap_or(0);
+        scene
+    }
+}
+
+/// How strongly each kind of theme art takes light: walls and features
+/// fully, scenery panels set back less, the far backdrop only a hint.
+const LIGHT_TAKEN: [f32; 4] = [1.0, 0.5, 1.0, 0.1];
+
+/// How strongly phantoms take light.
+const PHANTOM_LIGHT_TAKEN: f32 = 0.7;
+
+/// The lights this frame, gathered by the presentation.
+#[derive(Resource, Debug, Clone, Default, PartialEq)]
+pub struct WorldLights(pub Vec<WorldLight>);
+
+/// Pass the lights to the art of the theme in play and the phantoms.
+fn shine_lights(
+    lights: Res<WorldLights>,
+    tilesets: Option<Res<Tilesets>>,
+    phantoms: Option<Res<PhantomTiles>>,
+    theme: ThemeInPlay,
+    mut materials: ResMut<Assets<WorldMaterial>>,
+) {
+    let Some(tilesets) = tilesets else { return };
+    if !lights.is_changed() {
+        return;
+    }
+    let scene = SceneLights::from_lights(&lights.0);
+    let handles = tilesets.0[theme.index()]
+        .iter()
+        .chain(phantoms.as_ref().map(|p| &p.0));
+    for handle in handles {
+        if let Some(mut material) = materials.get_mut(handle)
+            && material.lights != scene
+        {
+            material.lights = scene.clone();
+        }
     }
 }
 
@@ -265,6 +344,7 @@ fn load_tiles(
         };
         materials.add(WorldMaterial {
             wash: Vec4::ZERO,
+            lights: SceneLights::default(),
             tiles,
         })
     };
@@ -280,11 +360,18 @@ fn load_tiles(
                 load("backdrop", backdrop, BACKDROP_LAYERS, true),
             ]
         })
-        .collect();
-    commands.insert_resource(Tilesets(themes));
+        .collect::<Vec<_>>();
     let phantoms = load("phantoms", PHANTOMS, super::phantoms::PHANTOM_LAYERS, false);
+    for set in &themes {
+        for (handle, take) in set.iter().zip(LIGHT_TAKEN) {
+            if let Some(mut material) = materials.get_mut(handle) {
+                material.wash.w = take;
+            }
+        }
+    }
+    commands.insert_resource(Tilesets(themes));
     if let Some(mut material) = materials.get_mut(&phantoms) {
-        material.wash = Vec4::ONE;
+        material.wash = Vec4::new(1.0, 1.0, 1.0, PHANTOM_LIGHT_TAKEN);
     }
     commands.insert_resource(PhantomTiles(phantoms));
 }
@@ -818,7 +905,7 @@ fn wash_tiles(
     let [r, g, b] = wash.0;
     for handle in tilesets.0.iter().flatten() {
         if let Some(mut material) = materials.get_mut(handle) {
-            material.wash = Vec4::new(r, g, b, 0.0);
+            material.wash = Vec4::new(r, g, b, material.wash.w);
         }
     }
 }
@@ -992,5 +1079,21 @@ mod tests {
             );
         }
         assert!(tileset_image(b"not a png", LAYERS).is_err());
+    }
+
+    #[test]
+    fn lights_pack_into_the_shader_s_layout_up_to_the_limit() {
+        let light = |x: f32| WorldLight {
+            from: Vec2::new(x, 1.0),
+            to: Vec2::new(x + 10.0, 2.0),
+            colour: Vec3::new(0.5, 0.25, 1.0),
+            radius: 100.0,
+        };
+        let scene = SceneLights::from_lights(&[light(0.0), light(50.0)]);
+        assert_eq!(scene.count, 2);
+        assert_eq!(scene.segments[1], Vec4::new(50.0, 1.0, 60.0, 2.0));
+        assert_eq!(scene.colours[0], Vec4::new(0.5, 0.25, 1.0, 100.0));
+        let many: Vec<WorldLight> = (0u8..20).map(|i| light(f32::from(i))).collect();
+        assert_eq!(SceneLights::from_lights(&many).count as usize, MAX_LIGHTS);
     }
 }
