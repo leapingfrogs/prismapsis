@@ -3,9 +3,10 @@
 //! so they feel far away.
 //!
 //! The far layer fills the view: the quarry's distant cliff of blocks, the
-//! caverns' rock with glowing fungus, the observatory's night sky. The near
-//! layer holds props with clear space between them: stone pillars, hanging
-//! stalactites, a colonnade of arches. Both tile in every direction, so any
+//! caverns' rock with glowing fungus, the observatory's night sky, the
+//! foundry's furnace hall and the glacier's aurora. The near layer holds
+//! props with clear space between them: stone pillars, hanging
+//! stalactites, a colonnade of arches, girders and chains, ice spires. Both tile in every direction, so any
 //! level size is covered, and both are dark and soft, so the level stands in
 //! front of them. They go through the same colour filter as the walls, so
 //! they start grey and their colours return with the level's.
@@ -44,6 +45,10 @@ pub fn backdrop(theme: &Theme) -> Canvas {
                     (WallStyle::Rock, _) => stalactites(theme, px, py),
                     (WallStyle::Marble, 0) => sky(theme, px, py),
                     (WallStyle::Marble, _) => colonnade(theme, px, py),
+                    (WallStyle::Plates, 0) => furnace_hall(theme, px, py),
+                    (WallStyle::Plates, _) => girders(theme, px, py),
+                    (WallStyle::Ice, 0) => aurora(theme, px, py),
+                    (WallStyle::Ice, _) => ice_spires(theme, px, py),
                 };
                 canvas.set(x, layer * BACKDROP_PX + y, pixel);
             }
@@ -269,6 +274,147 @@ fn stalactites(theme: &Theme, x: f32, y: f32) -> [f32; 4] {
         let alpha = inside.max(tip);
         if alpha > best[3] {
             best = [colour[0], colour[1], colour[2], alpha];
+        }
+    }
+    best
+}
+
+/// The foundry's far wall: a smoky hall with big pipes running up it and
+/// the glow of furnaces low down, breaking through in a few hot windows.
+fn furnace_hall(theme: &Theme, x: f32, y: f32) -> [f32; 4] {
+    let smoke = fbm(theme.seed * 7, x, y, 128.0);
+    let glow = 0.5 + 0.5 * (y / SIZE * std::f32::consts::TAU).sin();
+    let mut colour = lerp(
+        theme.backdrop,
+        scale(theme.glass[0], 0.35),
+        (0.25 + 0.35 * smoke) * glow,
+    );
+    // Pipes: two a tile, lit on their left.
+    for (centre, half) in [(140.0f32, 26.0f32), (390.0, 18.0)] {
+        let across = (x - centre) / half;
+        if across.abs() < 1.0 {
+            let lit = 0.6 - 0.35 * across;
+            colour = scale(theme.stone[2], 0.3 * lit);
+            // A flange every half tile.
+            if (y.rem_euclid(SIZE / 2.0) - 20.0).abs() < 5.0 {
+                colour = scale(colour, 1.4);
+            }
+        }
+    }
+    // Hot windows: a few small glowing slots.
+    let (cx, cy) = ((x / 64.0).floor(), (y / 64.0).floor());
+    #[allow(clippy::cast_possible_truncation)]
+    let window = hash(theme.seed * 43, cx as i64, cy as i64);
+    let (lx, ly) = (x.rem_euclid(64.0) - 32.0, y.rem_euclid(64.0) - 32.0);
+    if window > 0.9 {
+        // An arched furnace mouth, hottest low down, with a soft glow round it.
+        let mouth = lx.abs().max(-ly) < 9.0 && lx.hypot(ly.min(0.0)) < 9.0 && ly < 10.0;
+        let halo = (-(lx.hypot(ly) / 18.0).powi(2)).exp() * 0.5;
+        colour = lerp(colour, scale(theme.glass[1], 0.5), halo);
+        if mouth {
+            colour = scale(theme.crystal[0][1], 0.45 + 0.25 * (ly + 9.0) / 19.0);
+        }
+    }
+    opaque(colour)
+}
+
+/// The foundry's props: iron girders with cross-bracing between them and
+/// chains hanging in the gaps.
+fn girders(theme: &Theme, x: f32, y: f32) -> [f32; 4] {
+    let iron = |lit: f32| scale(theme.stone[2], 0.28 * lit);
+    // Two girders a tile, each an I-beam lit on its left.
+    for centre in [100.0f32, 356.0] {
+        let across = (x - centre).abs();
+        if across < 18.0 {
+            let flange = across > 13.0;
+            let lit = if x < centre { 1.0 } else { 0.7 };
+            let web = if flange { 1.1 } else { 0.8 };
+            return [
+                iron(lit * web)[0],
+                iron(lit * web)[1],
+                iron(lit * web)[2],
+                1.0,
+            ];
+        }
+    }
+    // Cross-bracing between the pair, an X every half tile.
+    let local = x - 118.0;
+    if (0.0..220.0).contains(&local) {
+        let along = y.rem_euclid(SIZE / 2.0);
+        let slope = (SIZE / 2.0) / 220.0;
+        let brace = (along - local * slope)
+            .abs()
+            .min((along - (220.0 - local) * slope).abs());
+        if brace < 3.0 {
+            let c = iron(0.85);
+            return [c[0], c[1], c[2], cover(brace - 2.5)];
+        }
+    }
+    // A chain hanging in the outer gap.
+    let chain = x - 470.0;
+    if chain.abs() < 5.0 {
+        let link = y.rem_euclid(16.0) - 8.0;
+        let ring = (chain.hypot(link * 0.8) - 4.0).abs();
+        let c = iron(1.2);
+        return [c[0], c[1], c[2], cover(ring - 1.0)];
+    }
+    [0.0; 4]
+}
+
+/// The glacier's sky: deep blue with stars and curtains of aurora rippling
+/// across it, green with violet edges.
+fn aurora(theme: &Theme, x: f32, y: f32) -> [f32; 4] {
+    let tau = std::f32::consts::TAU;
+    let mut colour = theme.backdrop;
+    // Two curtains a tile, waving across and drifting down.
+    for (offset, phase) in [(0.0f32, 0.0f32), (SIZE / 2.0, 1.7)] {
+        let wave = (x / SIZE * tau * 2.0 + phase).sin() * 40.0
+            + (x / SIZE * tau * 5.0 + phase).sin() * 12.0;
+        let centre = offset + SIZE / 4.0 + wave;
+        let d = wrapped(y, centre);
+        let rays = 0.8 + 0.2 * (x / SIZE * tau * 24.0 + phase).sin();
+        let core = (-(d / 26.0).powi(2)).exp() * rays;
+        let fringe = (-(d / 50.0).powi(2)).exp() * 0.5;
+        colour = lerp(colour, scale(theme.crystal[1][1], 0.35), fringe * 0.35);
+        colour = lerp(colour, [0.35, 0.95, 0.6], core * 0.2);
+    }
+    let (cx, cy) = ((x / 8.0).floor(), (y / 8.0).floor());
+    #[allow(clippy::cast_possible_truncation)]
+    let star = hash(theme.seed * 37, cx as i64, cy as i64);
+    if star > 0.98 {
+        let d = (x.rem_euclid(8.0) - 4.0).hypot(y.rem_euclid(8.0) - 4.0);
+        colour = lerp(colour, [0.9, 0.95, 1.0], (-(d / 1.2).powi(2)).exp() * 0.8);
+    }
+    opaque(colour)
+}
+
+/// The glacier's props: jagged spires of ice rising from below and
+/// hanging from above, pale and a little see-through.
+fn ice_spires(theme: &Theme, x: f32, y: f32) -> [f32; 4] {
+    let mut best = [0.0; 4];
+    for (index, centre) in (0i64..).zip([60.0f32, 180.0, 300.0, 440.0]) {
+        let size = hash(theme.seed * 23, index, 0);
+        let width = 30.0 + 40.0 * size;
+        let height = 160.0 + 200.0 * size;
+        // Rising from the tile's foot, which meets the next tile's head.
+        let up = (SIZE - y).rem_euclid(SIZE);
+        let ragged = 1.0 + 0.3 * (noise(theme.seed * 31, x, y, 16.0) - 0.5);
+        let half = width / 2.0 * (1.0 - up / height).max(0.0) * ragged;
+        let across = wrapped(x, centre);
+        let inside = if up < height {
+            cover(across - half)
+        } else {
+            0.0
+        };
+        if inside > best[3] {
+            let lit = 0.85 - 0.3 * ((x - centre) / width).clamp(-1.0, 1.0);
+            let facet = if (x - centre).rem_euclid(14.0) < 7.0 {
+                1.0
+            } else {
+                0.85
+            };
+            let colour = scale(theme.stone[1], 0.32 * lit * facet);
+            best = [colour[0], colour[1], colour[2], inside * 0.9];
         }
     }
     best

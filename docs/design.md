@@ -537,8 +537,16 @@ output is committed; the game only ever loads level files.
     panels in every hue with a rose window, a star or a crescent moon; and
     deep indigo. Each pane returns with its own hue, and a panel's hue only
     tints it lightly, so the richest scene comes once everything is back.
-  - **Foundry** (10–12, later): dark iron plates and rivets with glowing
-    seams, and gratings for panels.
+  - **Foundry** (10–12): dark iron plates, staggered and riveted, with a
+    copper rail along top surfaces and an iron lip with rivets underneath;
+    portholes and vents glowing with the furnace, and seams of molten
+    metal; gratings for panels with a furnace behind, a cog or a fan; and
+    a smoky warm black. Cool iron grey comes back with blue, the copper
+    and the glow with red and green.
+  - **Glacier** (13–15): blocks of ice with fine bright fractures, snow on
+    top and icicles hanging underneath; blue and violet crystal; frosted
+    windows with ferns of frost, a snowflake, a clear patch or a crack;
+    and a deep night blue.
 - **Backdrops** are two layers behind each theme's level, painted by the
   `art` tool to tile in every direction at a quarter of the walls'
   resolution, and drawn through the same colour filter, so they start grey
@@ -548,7 +556,10 @@ output is committed; the game only ever loads level files.
   dark cliff of blocks behind stone pillars hung with moss; the Crystal
   Caverns, banded rock freckled with glowing fungus behind stalactites
   with glowing tips; the Observatory, a night sky with nebulae and stars
-  seen through a marble arcade edged in gold.
+  seen through a marble arcade edged in gold. The Foundry has a
+  dim furnace hall of pipes and glowing furnace mouths behind iron girders
+  with cross-bracing and hanging chains; the Glacier, a starry sky with
+  soft curtains of aurora behind spires of ice.
 - **Sprites** for the hero, enemies, orbs, pickups and the prism are drawn
   in white and greys on one sheet (`assets/art/sprites.png`, painted by
   `just art`) and tinted in the game, so one sheet serves every colour.

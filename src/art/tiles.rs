@@ -31,7 +31,7 @@ use bevy::shader::ShaderRef;
 use bevy::sprite_render::{AlphaMode2d, Material2d, Material2dPlugin};
 
 /// Each theme's walls and panels, painted by `just art`, in campaign order.
-const TILESETS: [[&[u8]; 2]; 3] = [
+const TILESETS: [[&[u8]; 2]; 5] = [
     [
         include_bytes!("../../assets/art/quarry/walls.png"),
         include_bytes!("../../assets/art/quarry/panels.png"),
@@ -44,20 +44,32 @@ const TILESETS: [[&[u8]; 2]; 3] = [
         include_bytes!("../../assets/art/observatory/walls.png"),
         include_bytes!("../../assets/art/observatory/panels.png"),
     ],
+    [
+        include_bytes!("../../assets/art/foundry/walls.png"),
+        include_bytes!("../../assets/art/foundry/panels.png"),
+    ],
+    [
+        include_bytes!("../../assets/art/glacier/walls.png"),
+        include_bytes!("../../assets/art/glacier/panels.png"),
+    ],
 ];
 
 /// Each theme's features (walls with traits), painted by `just art`.
-const FEATURES: [&[u8]; 3] = [
+const FEATURES: [&[u8]; 5] = [
     include_bytes!("../../assets/art/quarry/features.png"),
     include_bytes!("../../assets/art/caverns/features.png"),
     include_bytes!("../../assets/art/observatory/features.png"),
+    include_bytes!("../../assets/art/foundry/features.png"),
+    include_bytes!("../../assets/art/glacier/features.png"),
 ];
 
 /// Each theme's backdrop, painted by `just art`.
-const BACKDROPS: [&[u8]; 3] = [
+const BACKDROPS: [&[u8]; 5] = [
     include_bytes!("../../assets/art/quarry/backdrop.png"),
     include_bytes!("../../assets/art/caverns/backdrop.png"),
     include_bytes!("../../assets/art/observatory/backdrop.png"),
+    include_bytes!("../../assets/art/foundry/backdrop.png"),
+    include_bytes!("../../assets/art/glacier/backdrop.png"),
 ];
 
 /// The backdrop's layers are drawn behind the scenery panels, far behind
