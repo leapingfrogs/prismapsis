@@ -6,6 +6,7 @@
 //! level cells meet and shows which of them are solid, so 16 tiles cover
 //! every edge and corner.
 
+pub mod backdrops;
 pub mod features;
 pub mod figures;
 pub mod glow;

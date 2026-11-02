@@ -4,6 +4,7 @@
 //! around it are filled, drawn through a shader that holds back each hue
 //! until it has been restored.
 
+use super::backdrops::{BACKDROP_LAYERS, BACKDROP_PX, BACKDROP_UNITS_PER_PX, PARALLAX};
 use super::features::{FEATURE_LAYERS, Feature, FeatureCells};
 use super::filtered;
 use super::paint::{Kind, Theme, linear, theme_index, themes};
@@ -11,10 +12,13 @@ use super::{BOTTOM_LEFT, BOTTOM_RIGHT, LAYERS, TOP_LEFT, TOP_RIGHT, layer, tint,
 use crate::level::{Campaign, CurrentLevel, LevelGeometry, Scenery, Solid};
 use crate::light::{Hue, Phantom, Shade};
 use crate::physics::{Aabb, Traits};
+use crate::render::MainCamera;
 use crate::spectrum_view::Wash;
 use bevy::asset::{RenderAssetUsages, embedded_asset, embedded_path};
 use bevy::ecs::system::SystemParam;
-use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
+use bevy::image::{
+    CompressedImageFormats, ImageAddressMode, ImageSampler, ImageSamplerDescriptor, ImageType,
+};
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::AsBindGroup;
@@ -44,6 +48,21 @@ const FEATURES: [&[u8]; 3] = [
     include_bytes!("../../assets/art/observatory/features.png"),
 ];
 
+/// Each theme's backdrop, painted by `just art`.
+const BACKDROPS: [&[u8]; 3] = [
+    include_bytes!("../../assets/art/quarry/backdrop.png"),
+    include_bytes!("../../assets/art/caverns/backdrop.png"),
+    include_bytes!("../../assets/art/observatory/backdrop.png"),
+];
+
+/// The backdrop's layers are drawn behind the scenery panels, far behind
+/// near.
+const BACKDROP_DEPTH: [f32; 2] = [-3.0, -2.0];
+
+/// How much bigger than the view the backdrop is drawn, so its edges never
+/// show.
+const BACKDROP_MARGIN: f32 = 1.1;
+
 /// Phantom platforms, painted by `just art` and tinted with their hues.
 const PHANTOMS: &[u8] = include_bytes!("../../assets/art/phantoms.png");
 
@@ -70,7 +89,13 @@ impl Plugin for TilesPlugin {
                     draw_feature_tiles,
                     wash_tiles,
                     tint_background,
+                    theme_backdrop,
                 ),
+            )
+            .add_systems(Startup, spawn_backdrop.after(load_tiles))
+            .add_systems(
+                PostUpdate,
+                scroll_backdrop.before(TransformSystems::Propagate),
             );
     }
 }
@@ -100,9 +125,9 @@ impl Material2d for WorldMaterial {
 }
 
 /// The materials walls, scenery and features are drawn with: each theme's
-/// walls and panels, then its features, in campaign order.
+/// walls and panels, then its features and backdrop, in campaign order.
 #[derive(Resource, Debug)]
-pub struct Tilesets(pub Vec<[Handle<WorldMaterial>; 3]>);
+pub struct Tilesets(pub Vec<[Handle<WorldMaterial>; 4]>);
 
 impl Tilesets {
     /// The material for `kind` in theme `theme`.
@@ -113,6 +138,11 @@ impl Tilesets {
     /// The material for features in theme `theme`.
     fn features(&self, theme: usize) -> Handle<WorldMaterial> {
         self.0[theme][2].clone()
+    }
+
+    /// The material for theme `theme`'s backdrop.
+    fn backdrop(&self, theme: usize) -> Handle<WorldMaterial> {
+        self.0[theme][3].clone()
     }
 }
 
@@ -194,8 +224,18 @@ fn load_tiles(
     mut images: Option<ResMut<Assets<Image>>>,
     mut materials: ResMut<Assets<WorldMaterial>>,
 ) {
-    let mut load = |name: &str, png: &[u8], layers: u16| {
-        let tiles = match (images.as_mut(), tileset_image(png, layers)) {
+    let mut load = |name: &str, png: &[u8], layers: u16, repeat: bool| {
+        let image = tileset_image(png, layers).map(|mut image| {
+            if repeat {
+                image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+                    address_mode_u: ImageAddressMode::Repeat,
+                    address_mode_v: ImageAddressMode::Repeat,
+                    ..ImageSamplerDescriptor::linear()
+                });
+            }
+            image
+        });
+        let tiles = match (images.as_mut(), image) {
             (Some(images), Ok(image)) => images.add(image),
             (None, _) => Handle::default(),
             (_, Err(problem)) => {
@@ -211,16 +251,18 @@ fn load_tiles(
     let themes = TILESETS
         .iter()
         .zip(FEATURES)
-        .map(|(&[walls, panels], features)| {
+        .zip(BACKDROPS)
+        .map(|((&[walls, panels], features), backdrop)| {
             [
-                load(Kind::Walls.name(), walls, LAYERS),
-                load(Kind::Panels.name(), panels, LAYERS),
-                load("features", features, FEATURE_LAYERS),
+                load(Kind::Walls.name(), walls, LAYERS, false),
+                load(Kind::Panels.name(), panels, LAYERS, false),
+                load("features", features, FEATURE_LAYERS, false),
+                load("backdrop", backdrop, BACKDROP_LAYERS, true),
             ]
         })
         .collect();
     commands.insert_resource(Tilesets(themes));
-    let phantoms = load("phantoms", PHANTOMS, super::phantoms::PHANTOM_LAYERS);
+    let phantoms = load("phantoms", PHANTOMS, super::phantoms::PHANTOM_LAYERS, false);
     if let Some(mut material) = materials.get_mut(&phantoms) {
         material.wash = Vec4::ONE;
     }
@@ -471,6 +513,106 @@ fn draw_panel_tiles(
             Transform::from_xyz(0.0, 0.0, PANEL_DEPTH),
         ),
     );
+}
+
+/// One of the backdrop's layers, by index: 0 far, 1 near.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackdropLayer(pub usize);
+
+/// The backdrop's layers, which stay for the whole game and follow the
+/// camera; `scroll_backdrop` sizes them to the view.
+fn spawn_backdrop(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    tilesets: Res<Tilesets>,
+    theme: ThemeInPlay,
+) {
+    for (layer, depth) in BACKDROP_DEPTH.into_iter().enumerate() {
+        commands.spawn((
+            Name::new(format!("Backdrop layer {layer}")),
+            BackdropLayer(layer),
+            Mesh2d(meshes.add(backdrop_quad(layer, Vec2::ZERO, Vec2::ONE))),
+            MeshMaterial2d(tilesets.backdrop(theme.index())),
+            Transform::from_xyz(0.0, 0.0, depth),
+        ));
+    }
+}
+
+/// A quad for backdrop `layer`, `size` across, centred on the camera at
+/// `camera`. Its texture is placed so the layer moves `PARALLAX` as far as
+/// the level does when the camera moves.
+#[must_use]
+pub fn backdrop_quad(layer: usize, camera: Vec2, size: Vec2) -> Mesh {
+    #[allow(clippy::cast_precision_loss)]
+    let tile = BACKDROP_PX as f32 * BACKDROP_UNITS_PER_PX;
+    let parallax = PARALLAX[layer.min(PARALLAX.len() - 1)];
+    let half = size / 2.0;
+    #[allow(clippy::cast_precision_loss)]
+    let alpha = layer as f32;
+    let corners = [
+        Vec2::new(-half.x, half.y),
+        Vec2::new(half.x, half.y),
+        Vec2::new(-half.x, -half.y),
+        Vec2::new(half.x, -half.y),
+    ];
+    let positions: Vec<[f32; 3]> = corners.iter().map(|c| [c.x, c.y, 0.0]).collect();
+    // Texture v runs down the image while world y runs up.
+    let uvs: Vec<[f32; 2]> = corners
+        .iter()
+        .map(|&c| {
+            let at = camera * parallax + c;
+            [at.x / tile, -at.y / tile]
+        })
+        .collect();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::RENDER_WORLD,
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0, 1.0, 1.0, alpha]; 4])
+    .with_inserted_indices(Indices::U32(vec![0, 2, 1, 1, 2, 3]))
+}
+
+/// Keep the backdrop behind the view, scrolled for the camera's position.
+fn scroll_backdrop(
+    mut meshes: ResMut<Assets<Mesh>>,
+    cameras: Query<(&Transform, &Projection), (With<MainCamera>, Without<BackdropLayer>)>,
+    mut layers: Query<(&BackdropLayer, &Mesh2d, &mut Transform)>,
+    mut last: Local<Option<(Vec2, Vec2)>>,
+) {
+    let Ok((camera, Projection::Orthographic(projection))) = cameras.single() else {
+        return;
+    };
+    let at = camera.translation.truncate();
+    let size = projection.area.size() * BACKDROP_MARGIN;
+    let changed = *last != Some((at, size));
+    *last = Some((at, size));
+    for (layer, mesh, mut transform) in &mut layers {
+        transform.translation.x = at.x;
+        transform.translation.y = at.y;
+        if changed && let Some(mut mesh) = meshes.get_mut(&mesh.0) {
+            *mesh = backdrop_quad(layer.0, at, size);
+        }
+    }
+}
+
+/// Draw the backdrop of the theme in play.
+fn theme_backdrop(
+    tilesets: Option<Res<Tilesets>>,
+    theme: ThemeInPlay,
+    mut layers: Query<&mut MeshMaterial2d<WorldMaterial>, With<BackdropLayer>>,
+) {
+    let Some(tilesets) = tilesets else { return };
+    if !theme.changed() {
+        return;
+    }
+    let wanted = tilesets.backdrop(theme.index());
+    for mut material in &mut layers {
+        if material.0 != wanted {
+            material.0 = wanted.clone();
+        }
+    }
 }
 
 /// Swap the old mesh entities for a new one, part of the level's geometry.

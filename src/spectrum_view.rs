@@ -372,7 +372,7 @@ mod tests {
     fn restoring_a_colour_floods_it_into_the_world() {
         let mut app = app();
         run(&mut app, 2);
-        let tilesets = 3 * crate::art::paint::themes().len();
+        let tilesets = 4 * crate::art::paint::themes().len();
         assert_eq!(
             washes(&app),
             vec![Vec4::ZERO; tilesets],

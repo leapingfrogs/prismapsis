@@ -527,6 +527,16 @@ output is committed; the game only ever loads level files.
     tints it lightly, so the richest scene comes once everything is back.
   - **Foundry** (10–12, later): dark iron plates and rivets with glowing
     seams, and gratings for panels.
+- **Backdrops** are two layers behind each theme's level, painted by the
+  `art` tool to tile in every direction at a quarter of the walls'
+  resolution, and drawn through the same colour filter, so they start grey
+  too. The far layer fills the view and moves a fifth as far as the level
+  as the camera follows the hero; the near layer holds props with space
+  between them and moves a little under half as far. The Quarry has a
+  dark cliff of blocks behind stone pillars hung with moss; the Crystal
+  Caverns, banded rock freckled with glowing fungus behind stalactites
+  with glowing tips; the Observatory, a night sky with nebulae and stars
+  seen through a marble arcade edged in gold.
 - **Sprites** for the hero, enemies, orbs, pickups and the prism are drawn
   in white and greys on one sheet (`assets/art/sprites.png`, painted by
   `just art`) and tinted in the game, so one sheet serves every colour.
