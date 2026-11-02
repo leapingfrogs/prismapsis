@@ -54,14 +54,32 @@ sfx:
 release *args:
     cargo run --release -- {{args}}
 
+# The WebAssembly features wasm-opt may use: those rustc's wasm32 target
+# enables by default, which every current browser supports.
+wasm_features := "--enable-bulk-memory --enable-multivalue --enable-mutable-globals --enable-nontrapping-float-to-int --enable-reference-types --enable-sign-ext"
+
+# Build the web version (WebGL2) into dist/web, optimised for size
+web:
+    cargo build --profile web --locked --target wasm32-unknown-unknown --bin prismapsis
+    rm -rf dist/web
+    wasm-bindgen --target web --no-typescript --out-dir dist/web --out-name prismapsis target/wasm32-unknown-unknown/web/prismapsis.wasm
+    wasm-opt -Oz {{wasm_features}} --strip-debug --strip-producers -o dist/web/prismapsis_bg.wasm dist/web/prismapsis_bg.wasm
+    cp web/index.html dist/web/
+
+# Build the web version and serve it at http://localhost:8765 (or another
+# port)
+web-serve port="8765": web
+    miniserve --index index.html --port {{port}} dist/web
+
 # Format all code
 fmt:
     cargo fmt --all
 
-# Check formatting and run clippy
+# Check formatting and run clippy, for the desktop and the web
 lint:
     cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+    cargo clippy --locked --target wasm32-unknown-unknown --lib --bin prismapsis -- -D warnings
 
 # Run the tests
 test *args:

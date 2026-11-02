@@ -116,8 +116,13 @@ impl Plugin for SimulationPlugin {
 
 /// A seed from the clock, for unpredictable drops between runs.
 fn time_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    // The standard library has no clock in the browser.
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::time::{SystemTime, UNIX_EPOCH};
+    #[cfg(target_arch = "wasm32")]
+    use web_time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         // Only the low bits matter for a seed.
         .map_or(1, |d| {
             #[allow(clippy::cast_possible_truncation)]
@@ -129,6 +134,10 @@ fn time_seed() -> u64 {
 /// Configuration for the primary window. With `fullscreen`, the game starts
 /// borderless at the monitor's native resolution; otherwise it opens a
 /// `WINDOW_SIZE` window.
+///
+/// In a browser it draws into the page's `#game`
+/// canvas, filling its container, and keeps keys like space from
+/// scrolling the page.
 #[must_use]
 pub fn primary_window(fullscreen: bool) -> Window {
     Window {
@@ -139,9 +148,15 @@ pub fn primary_window(fullscreen: bool) -> Window {
         } else {
             WindowMode::Windowed
         },
+        canvas: Some(CANVAS.to_owned()),
+        fit_canvas_to_parent: true,
+        prevent_default_event_handling: true,
         ..default()
     }
 }
+
+/// The page element the web build draws into.
+pub const CANVAS: &str = "#game";
 
 #[cfg(test)]
 mod tests {

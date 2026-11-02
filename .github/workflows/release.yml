@@ -3,8 +3,14 @@ name: Release
 on:
   push:
     branches: [main]
-  # Manual runs build every platform as workflow artifacts without releasing.
+  # Manual runs build every platform as workflow artifacts without releasing,
+  # and can publish the web build to GitHub Pages from main.
   workflow_dispatch:
+    inputs:
+      pages:
+        description: Publish the web build to GitHub Pages
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -93,3 +99,76 @@ jobs:
         with:
           name: ${{ matrix.target }}
           path: ${{ steps.package.outputs.file }}
+
+  web:
+    name: Build for the web
+    needs: release-please
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG || github.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-web
+      # wasm-bindgen-cli must match the wasm-bindgen crate in Cargo.lock.
+      - id: versions
+        run: |
+          version=$(grep -A1 '^name = "wasm-bindgen"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+          echo "wasm-bindgen=$version" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,wasm-bindgen@${{ steps.versions.outputs.wasm-bindgen }}
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends binaryen
+      - run: just web
+      - name: Package
+        id: package
+        run: |
+          name="prismapsis-${TAG:-${GITHUB_SHA::7}}-web"
+          cp -r dist/web "$name"
+          zip -qr "$name.zip" "$name"
+          echo "file=$name.zip" >> "$GITHUB_OUTPUT"
+      - name: Upload to release
+        if: env.TAG != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "${{ steps.package.outputs.file }}" --clobber
+      - name: Upload workflow artifact
+        if: env.TAG == ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: web
+          path: ${{ steps.package.outputs.file }}
+      - name: Upload for GitHub Pages
+        if: env.TAG != '' || inputs.pages
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/web
+
+  pages:
+    name: Publish to GitHub Pages
+    needs: [release-please, web]
+    if: >-
+      always() && needs.web.result == 'success' &&
+      (needs.release-please.outputs.release_created == 'true' || inputs.pages)
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v5

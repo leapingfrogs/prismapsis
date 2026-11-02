@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Prismapsis</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0d0d1a;
+        color: #c8cad6;
+        font-family: system-ui, sans-serif;
+        overflow: hidden;
+        overscroll-behavior: none;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #frame {
+        position: fixed;
+        inset: 0;
+      }
+      #game {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+      }
+      #status {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 2em;
+        font-size: 1.3em;
+      }
+      #status[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="frame"><canvas id="game" tabindex="0"></canvas></div>
+    <div id="status">Loading Prismapsis…</div>
+    <script>
+      // Browsers start audio suspended until the player interacts with the
+      // page. Keep every audio context the game makes and resume them all on
+      // the first key, click or touch.
+      (() => {
+        const contexts = [];
+        const Original = window.AudioContext || window.webkitAudioContext;
+        if (!Original) return;
+        const Tracked = function (...args) {
+          const context = new Original(...args);
+          contexts.push(context);
+          return context;
+        };
+        Tracked.prototype = Original.prototype;
+        window.AudioContext = Tracked;
+        window.webkitAudioContext = Tracked;
+        const resume = () => {
+          for (const context of contexts) {
+            if (context.state !== "running") context.resume();
+          }
+        };
+        for (const event of ["keydown", "pointerdown", "touchend"]) {
+          window.addEventListener(event, resume, { capture: true });
+        }
+      })();
+    </script>
+    <script type="module">
+      import init from "./prismapsis.js";
+
+      const status = document.getElementById("status");
+      init()
+        .then(() => {
+          status.hidden = true;
+        })
+        .catch((error) => {
+          // winit leaves its event loop by throwing; that isn't a failure.
+          if (String(error).includes("Using exceptions for control flow")) {
+            status.hidden = true;
+            return;
+          }
+          console.error(error);
+          status.textContent = `Prismapsis couldn't start: ${error}`;
+        });
+      document.getElementById("game").focus();
+    </script>
+  </body>
+</html>

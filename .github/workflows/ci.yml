@@ -43,6 +43,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
+  web:
+    name: Web build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+      # The game for the browser; the command-line tools only run natively.
+      - run: cargo clippy --locked --target wasm32-unknown-unknown --lib --bin prismapsis -- -D warnings
+
   coverage:
     name: Test & coverage
     runs-on: ubuntu-latest

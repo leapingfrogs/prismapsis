@@ -34,11 +34,21 @@ breaking changes, which bump the minor version while below 1.0.
 PR open on `main` that collects unreleased changes, bumps the version in
 `Cargo.toml` and updates `CHANGELOG.md`. Edit that PR to curate the release
 notes, then merge it to publish. Merging tags the release, and the `Release`
-workflow builds Linux, Windows and macOS binaries and attaches them to it.
+workflow builds Linux, Windows and macOS binaries and attaches them to it. It
+also builds the web version, attaches it as a zip and publishes it to GitHub
+Pages, where it can be played in a browser.
 
 To check that every platform builds without releasing, run the `Release`
 workflow manually from the Actions tab; the builds are saved as workflow
-artifacts.
+artifacts. Tick "Publish the web build to GitHub Pages" on a manual run
+from `main` to update the playable site without a release.
+
+## Web build
+
+`just web` builds the browser version into `dist/web`, and `just web-serve`
+builds it and serves it at <http://localhost:8765>. The page around the game
+is `web/index.html`. `just lint` and CI check that the game still builds for
+the web.
 
 ## Local checks
 

@@ -277,7 +277,7 @@ fn spawn_title(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>)
         Screen::Title,
         "Prismapsis",
         &lines,
-        vec![Choice::Play, Choice::Settings, Choice::Quit],
+        title_choices(),
         "Left and right spin, space fires\nShift holds the prism, P pauses",
         time.elapsed_secs_f64(),
     );
@@ -298,6 +298,16 @@ fn spawn_settings(mut commands: Commands, time: Res<Time<Real>>) {
         "Left and right change a volume",
         time.elapsed_secs_f64(),
     );
+}
+
+/// The title's choices. A browser tab can't be quit from the game, so the
+/// web build leaves that out.
+fn title_choices() -> Vec<Choice> {
+    let mut choices = vec![Choice::Play, Choice::Settings];
+    if cfg!(not(target_arch = "wasm32")) {
+        choices.push(Choice::Quit);
+    }
+    choices
 }
 
 fn score_lines(score: Score) -> Vec<String> {

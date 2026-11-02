@@ -410,6 +410,30 @@ output is committed; the game only ever loads level files.
   and 5000 for finishing a level. It shows in the top right corner. The
   best score lasts until the game is closed; it isn't saved yet.
 
+## Web build
+
+- **Played from the project's GitHub Pages site.** Each release builds the
+  web version, publishes it there and attaches it to the release as a zip.
+  CI checks every change still builds for the web.
+- **WebGL2**, which every current browser has, Safari on iOS included.
+  WebGPU can come later as a second build that the page picks when the
+  browser has it.
+- **Small enough to download:** Bevy's 3D renderer and Ogg support are left
+  out of every build, as this is a 2D game; the `web` profile optimises for
+  size with full link-time optimisation, and `wasm-opt` shrinks it further,
+  using only the WebAssembly features the Rust target enables by default.
+  The result is about 26 MB, 11 MB compressed, of which about 5.6 MB is the
+  embedded art and audio.
+- **The page** (`web/index.html`) gives the game a `#game` canvas filling
+  the window; keys like space don't scroll it. Browsers keep audio
+  suspended until the player interacts, so the page resumes it on the first
+  key, click or touch. It already stops scrolling, zooming and the
+  long-press menu, ready for touch controls (8c).
+- **In a browser** the title has no Quit, the clock comes from `web-time`,
+  and settings aren't saved yet, as there's no configuration directory;
+  the browser's local storage could keep them later.
+- `just web` builds it into `dist/web`; `just web-serve` serves it locally.
+
 ## Resolution and art
 
 - The world is **1080 units tall** at any window size; width follows the

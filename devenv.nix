@@ -27,6 +27,8 @@ in
       "rust-src"
       "llvm-tools-preview"
     ];
+    # The web build.
+    targets = [ "wasm32-unknown-unknown" ];
   };
 
   packages =
@@ -41,6 +43,11 @@ in
       actionlint
       committed
       just
+      # The web build: wasm-bindgen-cli must match the wasm-bindgen crate
+      # in Cargo.lock; binaryen provides wasm-opt.
+      wasm-bindgen-cli
+      binaryen
+      miniserve
     ]
     ++ runtimeLibs;
 
