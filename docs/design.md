@@ -444,12 +444,17 @@ output is committed; the game only ever loads level files.
   nothing else in the game knows about touch (`src/touch.rs`).
 - **Buttons,** drawn with Bevy UI over the level in play: spin left and
   right at the bottom left, with hover up and down above them only while
-  the hero has anti-gravity; fire and hold the prism at the bottom right;
-  pause at the top right under the score. A finger that starts on hold
-  keeps the prism held wherever it slides, and sliding it up turns the
-  prism anticlockwise and down clockwise, as Q and E do. Each button holds its key while
-  any finger is on it, so one thumb can hold fire while the other taps
-  spin, and a finger sliding onto a button presses it.
+  the hero has anti-gravity; fire at the bottom right with hold the prism
+  above it, in reach of the same thumb; pause at the top right under the
+  score. Each button holds its key while any finger is on it, so one
+  thumb can hold fire while the other taps spin, and a finger sliding
+  onto a button presses it.
+- **Hold** holds the prism while pressed, and a tap locks it held, so
+  fire is free for the same thumb; it reads "Held" and stays lit until
+  tapped again. A finger that starts on hold keeps the prism held
+  wherever it slides, sliding it up turns the prism anticlockwise and
+  down clockwise, as Q and E do, and lifting it leaves the prism locked.
+  The lock lets go when play ends or the buttons hide.
 - **Shown** after the first touch, and hidden again by a key or gamepad
   press.
 - **Menus** are tapped: a tap selects the nearest line and chooses it; on
