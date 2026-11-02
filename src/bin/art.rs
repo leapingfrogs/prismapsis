@@ -1,8 +1,8 @@
 //! Generated art tools.
 //!
 //! - `art` paints every theme's tilesets (walls, panels and features), the
-//!   sprite sheet, the phantom tileset, the beam and exit art and the HUD's
-//!   tube into `assets/art`.
+//!   sprite sheet, the phantom tileset, the beam and exit art, the HUD's
+//!   tube and the touch buttons' symbols into `assets/art`.
 //! - `art --check` changes nothing and fails if a committed image is out of
 //!   date.
 //! - `art preview DIR` writes a sample of each theme to DIR, drawn
@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use bevy::color::{Color, ColorToComponents};
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
-use prismapsis::art::{backdrops, features, glow, hud, phantoms};
+use prismapsis::art::{backdrops, features, glow, hud, phantoms, touch};
 use prismapsis::enemy::EnemyKind;
 use prismapsis::light::Primary;
 use prismapsis::powerup::PowerUp;
@@ -93,6 +93,7 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
         (glow::EXIT_LIGHT_PATH.to_owned(), glow::exit_light()),
         (hud::TUBE_PATH.to_owned(), hud::tube()),
         (hud::FILL_PATH.to_owned(), hud::fill()),
+        (touch::GLYPHS_PATH.to_owned(), touch::glyphs()),
     ]);
     for (relative, canvas) in images {
         let path = assets.join(&relative);

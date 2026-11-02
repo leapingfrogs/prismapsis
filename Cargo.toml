@@ -28,9 +28,11 @@ toml = "1.1.8"
 noise = "0.9.0"
 png = "0.18.1"
 
-# The browser has no `std::time` clock.
+# The browser has no `std::time` clock, and keeps settings in its local
+# storage.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-time = "1.1.0"
+web-sys = { version = "0.3.107", features = ["Window", "Storage"] }
 
 [build-dependencies]
 toml = "1.1.8"

@@ -15,6 +15,7 @@ pub mod paint;
 pub mod phantoms;
 pub mod sprites;
 pub mod tiles;
+pub mod touch;
 
 /// Tile size in pixels: 2× the 40-unit cell, to stay sharp at 4K.
 pub const TILE_PX: u32 = 80;

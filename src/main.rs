@@ -32,7 +32,7 @@ fn main() -> AppExit {
             }),
             GamePlugin {
                 level,
-                settings: prismapsis::settings::default_path(),
+                settings: prismapsis::settings::default_store(),
             },
         ))
         .run()
