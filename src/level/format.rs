@@ -78,6 +78,16 @@ pub enum Tile {
         height: Option<f32>,
         traits: Traits,
     },
+    /// A wall that moves back and forth along the track beside it at
+    /// `speed`.
+    Mover {
+        hue: Option<Hue>,
+        height: Option<f32>,
+        traits: Traits,
+        speed: f32,
+    },
+    /// Where a moving platform can go; drawn as a rail, with no collision.
+    Track,
     /// Background decoration with no collision.
     Scenery(Option<Hue>),
     Lens(Primary),
@@ -101,6 +111,12 @@ pub const PAD_HEIGHT: f32 = 20.0;
 pub const SPRING: f32 = 1.6;
 pub const MUD: f32 = 0.5;
 
+/// How fast the default moving platform, `_`, travels (units per second).
+pub const MOVER_SPEED: f32 = 120.0;
+
+/// Landings the default crumbling platform, `:`, takes before it gives way.
+pub const CRUMBLE: u8 = 2;
+
 /// The range a legend's `bounce` can take.
 pub const BOUNCE_RANGE: std::ops::RangeInclusive<f32> = 0.25..=3.0;
 
@@ -111,6 +127,37 @@ const fn feature(height: Option<f32>, traits: Traits) -> Tile {
         height,
         traits,
     }
+}
+
+/// Default tiles for platforms that change: `:` crumbles, `_` moves along
+/// the track `-` beside it.
+fn changing_defaults() -> [(char, Tile); 3] {
+    let one_way = Traits {
+        one_way: true,
+        ..Traits::default()
+    };
+    [
+        (
+            ':',
+            feature(
+                Some(PLATFORM_HEIGHT),
+                Traits {
+                    crumble: CRUMBLE,
+                    ..one_way
+                },
+            ),
+        ),
+        (
+            '_',
+            Tile::Mover {
+                hue: None,
+                height: Some(PLATFORM_HEIGHT),
+                traits: one_way,
+                speed: MOVER_SPEED,
+            },
+        ),
+        ('-', Tile::Track),
+    ]
 }
 
 /// The legend every level starts from; a level's own legend adds to or
@@ -181,6 +228,7 @@ pub fn default_legend() -> BTreeMap<char, Tile> {
         ('M', Hue::Magenta),
         ('W', Hue::White),
     ];
+    legend.extend(changing_defaults());
     for (ch, hue) in hues {
         let wall = Tile::Wall {
             hue: Some(hue),
@@ -321,6 +369,81 @@ pub struct PlacedPickup {
     pub hidden: Option<Hue>,
 }
 
+/// A platform that moves back and forth along a straight track.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Mover {
+    /// Where it starts.
+    pub aabb: Aabb,
+    pub hue: Option<Hue>,
+    pub traits: Traits,
+    /// The direction it travels, across or up.
+    pub axis: Vec2,
+    /// How far it goes back and forth along `axis` from where it starts:
+    /// `low` is at most 0 and `high` at least 0.
+    pub low: f32,
+    pub high: f32,
+    pub speed: f32,
+}
+
+impl Mover {
+    /// How far along its axis it is `t` seconds into the level. It sets off
+    /// towards `high` and turns round at each end.
+    #[must_use]
+    pub fn offset(&self, t: f32) -> f32 {
+        let span = self.high - self.low;
+        if span <= 0.0 || self.speed <= 0.0 {
+            return 0.0;
+        }
+        let travelled = (-self.low + self.speed * t).rem_euclid(2.0 * span);
+        self.low
+            + if travelled <= span {
+                travelled
+            } else {
+                2.0 * span - travelled
+            }
+    }
+
+    /// Its velocity `t` seconds into the level.
+    #[must_use]
+    pub fn velocity(&self, t: f32) -> Vec2 {
+        let span = self.high - self.low;
+        if span <= 0.0 || self.speed <= 0.0 {
+            return Vec2::ZERO;
+        }
+        let travelled = (-self.low + self.speed * t).rem_euclid(2.0 * span);
+        let sign = if travelled < span { 1.0 } else { -1.0 };
+        self.axis * self.speed * sign
+    }
+
+    /// Where it is `t` seconds into the level.
+    #[must_use]
+    pub fn aabb_at(&self, t: f32) -> Aabb {
+        self.aabb_at_offset(self.offset(t))
+    }
+
+    /// Where it is when `offset` along its axis from where it starts.
+    #[must_use]
+    pub fn aabb_at_offset(&self, offset: f32) -> Aabb {
+        let shift = self.axis * offset;
+        Aabb::new(self.aabb.min + shift, self.aabb.max + shift)
+    }
+
+    /// Where it can be, a tile apart along its track from end to end, for
+    /// tools that treat it as standing still.
+    #[must_use]
+    pub fn stops(&self, tile: f32) -> Vec<Aabb> {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let count = ((self.high - self.low) / tile).round() as usize;
+        (0..=count)
+            .map(|i| {
+                #[allow(clippy::cast_precision_loss)]
+                let shift = self.axis * (self.low + i as f32 * tile);
+                Aabb::new(self.aabb.min + shift, self.aabb.max + shift)
+            })
+            .collect()
+    }
+}
+
 /// A parsed, valid level, in world units with the origin at the bottom left.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Level {
@@ -330,6 +453,9 @@ pub struct Level {
     pub start: Vec2,
     pub walls: Vec<(Aabb, Option<Hue>, Traits)>,
     pub phantoms: Vec<(Aabb, Hue, Traits)>,
+    pub movers: Vec<Mover>,
+    /// Where moving platforms run, drawn as rails.
+    pub tracks: Vec<Aabb>,
     pub scenery: Vec<(Aabb, Option<Hue>)>,
     pub exits: Vec<Aabb>,
     pub checkpoints: Vec<Aabb>,
@@ -393,6 +519,11 @@ pub enum LevelError {
         col: usize,
     },
     BackgroundTooBig,
+    /// A moving platform with no track beside it to run along.
+    NoTrack {
+        row: usize,
+        col: usize,
+    },
     Starts(usize),
     NoExit,
     Waves(String),
@@ -420,6 +551,12 @@ impl fmt::Display for LevelError {
                 col + 1
             ),
             Self::BackgroundTooBig => write!(f, "the background is bigger than the map"),
+            Self::NoTrack { row, col } => write!(
+                f,
+                "map row {}, column {}: a moving platform needs a track beside it",
+                row + 1,
+                col + 1
+            ),
             Self::Starts(0) => write!(f, "the map has no start"),
             Self::Starts(count) => write!(f, "the map has {count} starts; it needs one"),
             Self::NoExit => write!(f, "the map has no exit"),
@@ -462,6 +599,7 @@ enum Marker {
     Start,
     Exit,
     Checkpoint,
+    Track,
 }
 
 #[derive(Deserialize)]
@@ -477,6 +615,31 @@ struct TileFile {
     one_way: Option<bool>,
     bounce: Option<f32>,
     mirror: Option<bool>,
+    crumble: Option<u8>,
+    breakable: Option<Tint>,
+    speed: Option<f32>,
+}
+
+/// Check a legend entry's settings for platforms that change, returning the
+/// colour that breaks it if it's breakable.
+fn changing(spec: &TileFile) -> Result<Option<Primary>, String> {
+    if (spec.breakable.is_some() || spec.speed.is_some()) && spec.wall.is_none() {
+        return Err("only walls can be breakable or move".to_owned());
+    }
+    if spec.crumble == Some(0) {
+        return Err("crumble must be at least 1 landing".to_owned());
+    }
+    if let Some(speed) = spec.speed
+        && !(speed > 0.0 && speed.is_finite())
+    {
+        return Err(format!("speed must be above 0, not {speed}"));
+    }
+    spec.breakable
+        .map(|tint| {
+            tint.primary()
+                .ok_or_else(|| "only red, green or blue beams break things".to_owned())
+        })
+        .transpose()
 }
 
 /// Turn one legend entry into a tile.
@@ -488,6 +651,7 @@ fn legend_tile(value: toml::Value, tile_size: f32) -> Result<Tile, String> {
             Marker::Start => Tile::Start,
             Marker::Exit => Tile::Exit,
             Marker::Checkpoint => Tile::Checkpoint,
+            Marker::Track => Tile::Track,
         });
     }
     let spec: TileFile = value.try_into().map_err(|e| e.to_string())?;
@@ -514,10 +678,14 @@ fn legend_tile(value: toml::Value, tile_size: f32) -> Result<Tile, String> {
             "height must be above 0 and at most the tile size ({tile_size})"
         ));
     }
-    let has_traits = spec.one_way.is_some() || spec.bounce.is_some() || spec.mirror.is_some();
+    let has_traits = spec.one_way.is_some()
+        || spec.bounce.is_some()
+        || spec.mirror.is_some()
+        || spec.crumble.is_some();
     if has_traits && spec.wall.is_none() && spec.phantom.is_none() {
-        return Err("only walls and phantoms have one_way, bounce or mirror".to_owned());
+        return Err("only walls and phantoms have one_way, bounce, mirror or crumble".to_owned());
     }
+    let breakable = changing(&spec)?;
     if let Some(bounce) = spec.bounce
         && !BOUNCE_RANGE.contains(&bounce)
     {
@@ -531,12 +699,21 @@ fn legend_tile(value: toml::Value, tile_size: f32) -> Result<Tile, String> {
         one_way: spec.one_way.unwrap_or(false),
         bounce: spec.bounce.unwrap_or(1.0),
         mirror: spec.mirror.unwrap_or(false),
+        crumble: spec.crumble.unwrap_or(0),
+        breakable,
     };
     let coloured = |tint: Tint| {
         tint.hue()
             .ok_or_else(|| "needs a colour, not grey".to_owned())
     };
-    Ok(if let Some(tint) = spec.wall {
+    Ok(if let (Some(tint), Some(speed)) = (spec.wall, spec.speed) {
+        Tile::Mover {
+            hue: tint.hue(),
+            height: spec.height,
+            traits,
+            speed,
+        }
+    } else if let Some(tint) = spec.wall {
         Tile::Wall {
             hue: tint.hue(),
             height: spec.height,
@@ -732,9 +909,75 @@ fn place(
 struct Areas {
     walls: Vec<(Aabb, Option<Hue>, Traits)>,
     phantoms: Vec<(Aabb, Hue, Traits)>,
+    movers: Vec<Mover>,
+    tracks: Vec<Aabb>,
     scenery: Vec<(Aabb, Option<Hue>)>,
     exits: Vec<Aabb>,
     checkpoints: Vec<Aabb>,
+}
+
+/// Track cells in a row from `(row, col)` stepping by `step` columns, or
+/// in a column stepping by `step` rows.
+fn track_run(
+    legend: &BTreeMap<char, Tile>,
+    map: &Grid,
+    (row, col): (usize, usize),
+    (down, across): (isize, isize),
+) -> usize {
+    let mut count = 0;
+    let (mut r, mut c) = (row, col);
+    loop {
+        let (Some(next_r), Some(next_c)) =
+            (r.checked_add_signed(down), c.checked_add_signed(across))
+        else {
+            return count;
+        };
+        if next_r >= map.height()
+            || next_c >= map.width()
+            || legend.get(&map.get(next_r, next_c)) != Some(&Tile::Track)
+        {
+            return count;
+        }
+        count += 1;
+        (r, c) = (next_r, next_c);
+    }
+}
+
+/// A moving platform covering `rect`, running along the track beside it:
+/// across if there's track to its left or right, otherwise up and down.
+#[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
+fn mover(
+    legend: &BTreeMap<char, Tile>,
+    map: &Grid,
+    layout: &Layout,
+    rect: CellRect,
+    height: Option<f32>,
+    hue: Option<Hue>,
+    traits: Traits,
+    speed: f32,
+) -> Option<Mover> {
+    let tile = layout.tile;
+    let left = track_run(legend, map, (rect.row, rect.col), (0, -1));
+    let right = track_run(legend, map, (rect.row, rect.col + rect.cols - 1), (0, 1));
+    let (axis, low, high) = if left + right > 0 {
+        (Vec2::X, -(left as f32) * tile, right as f32 * tile)
+    } else {
+        let up = track_run(legend, map, (rect.row, rect.col), (-1, 0));
+        let down = track_run(legend, map, (rect.row + rect.rows - 1, rect.col), (1, 0));
+        if up + down == 0 {
+            return None;
+        }
+        (Vec2::Y, -(down as f32) * tile, up as f32 * tile)
+    };
+    Some(Mover {
+        aabb: layout.aabb(rect, height),
+        hue,
+        traits,
+        axis,
+        low,
+        high,
+        speed,
+    })
 }
 
 fn merge_areas(
@@ -743,12 +986,15 @@ fn merge_areas(
     background: &Grid,
     background_chars: &BTreeSet<char>,
     layout: &Layout,
+    errors: &mut Vec<LevelError>,
 ) -> Areas {
     let mut areas = Areas::default();
     for (&ch, &entry) in legend {
         // Thin tiles only merge along their row.
         let (vertical, height) = match entry {
             Tile::Wall { height, .. } | Tile::Phantom { height, .. } => (height.is_none(), height),
+            // A moving platform is one row, so its track decides the way.
+            Tile::Mover { height, .. } => (false, height),
             _ => (true, None),
         };
         let rects = || {
@@ -763,6 +1009,20 @@ fn merge_areas(
             Tile::Phantom { hue, traits, .. } => {
                 areas.phantoms.extend(rects().map(|a| (a, hue, traits)));
             }
+            Tile::Mover {
+                hue, traits, speed, ..
+            } => {
+                for rect in merge_cells(map, ch, false) {
+                    match mover(legend, map, layout, rect, height, hue, traits, speed) {
+                        Some(mover) => areas.movers.push(mover),
+                        None => errors.push(LevelError::NoTrack {
+                            row: rect.row,
+                            col: rect.col,
+                        }),
+                    }
+                }
+            }
+            Tile::Track => areas.tracks.extend(rects()),
             Tile::Scenery(hue) => areas.scenery.extend(rects().map(|a| (a, hue))),
             Tile::Exit => areas.exits.extend(rects()),
             Tile::Checkpoint => areas.checkpoints.extend(rects()),
@@ -821,6 +1081,7 @@ pub fn parse(source: &str) -> Result<Level, Vec<LevelError>> {
         &background,
         &placed.background_chars,
         &layout,
+        &mut errors,
     );
 
     if placed.starts.len() != 1 {
@@ -842,6 +1103,8 @@ pub fn parse(source: &str) -> Result<Level, Vec<LevelError>> {
         start: placed.starts[0],
         walls: areas.walls,
         phantoms: areas.phantoms,
+        movers: areas.movers,
+        tracks: areas.tracks,
         scenery: areas.scenery,
         exits: areas.exits,
         checkpoints: areas.checkpoints,
@@ -1095,7 +1358,7 @@ mote_light = -1
             "legend 't': height must be above 0",
             "legend 'g': needs a colour, not grey",
             "legend 'm': unknown variant",
-            "legend 's': only walls and phantoms have one_way, bounce or mirror",
+            "legend 's': only walls and phantoms have one_way, bounce, mirror or crumble",
             "legend 'b': bounce must be from 0.25 to 3",
             "waves: wave colours must be red, green or blue",
             "waves: interval must be positive",
@@ -1118,5 +1381,48 @@ mote_light = -1
             problems(BOX, "[waves]\ncolours = []\n"),
             vec!["waves: give at least one wave colour"]
         );
+    }
+
+    #[test]
+    fn moving_platforms_run_along_the_track_beside_them() {
+        let across = level("#--_____----#\n#@         X#\n############\n", "").unwrap();
+        let mover = across.movers[0];
+        assert_eq!(mover.axis, Vec2::X);
+        assert!((mover.low + 80.0).abs() < 1e-4 && (mover.high - 160.0).abs() < 1e-4);
+        assert!((mover.speed - MOVER_SPEED).abs() < f32::EPSILON);
+        assert!(mover.traits.one_way);
+        let up = level("# - #\n# - #\n# _ #\n#@ X#\n#####\n", "").unwrap();
+        let mover = up.movers[0];
+        assert_eq!(mover.axis, Vec2::Y);
+        assert!(mover.low.abs() < 1e-4 && (mover.high - 80.0).abs() < 1e-4);
+        assert_eq!(
+            level("#  ___  #\n#@      X#\n#########\n", ""),
+            Err(vec![LevelError::NoTrack { row: 0, col: 3 }])
+        );
+    }
+
+    #[test]
+    fn crumbling_and_breakable_walls_come_from_the_legend() {
+        let parsed = level(
+            "#::  !!#\n#@    X#\n########\n",
+            "[legend]\n\"!\" = { wall = \"grey\", breakable = \"blue\" }\n",
+        )
+        .unwrap();
+        let traits: Vec<Traits> = parsed.walls.iter().map(|w| w.2).collect();
+        assert!(traits.iter().any(|t| t.crumble == CRUMBLE && t.one_way));
+        assert!(traits.iter().any(|t| t.breakable == Some(Primary::Blue)));
+        let problem = |entry: &str| {
+            level("#@X#\n####\n", &format!("[legend]\n\"!\" = {entry}\n"))
+                .unwrap_err()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert!(problem("{ phantom = \"red\", breakable = \"red\" }")[0].contains("only walls"));
+        assert!(
+            problem("{ wall = \"grey\", breakable = \"white\" }")[0].contains("red, green or blue")
+        );
+        assert!(problem("{ wall = \"grey\", crumble = 0 }")[0].contains("at least 1"));
+        assert!(problem("{ wall = \"grey\", speed = -5 }")[0].contains("above 0"));
     }
 }

@@ -11,7 +11,9 @@ use crate::enemy::{Enemy, HIT_FLASH};
 use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Position, update_facing};
 use crate::level::Solid;
+use crate::light::Primary;
 use crate::physics::{Aabb, Traits, ray_aabb, ray_aabb_face, ray_circle};
+use crate::platforms::Breakable;
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
@@ -468,6 +470,25 @@ fn update_energy(
 
 /// While firing, apply damage ticks to every enemy the beams touch.
 /// Defeating them (at zero health) is handled in `enemy`.
+/// Whether a beam of `colour` breaks `block`: only its own split colour.
+fn breaks(colour: BeamColour, block: &Breakable) -> bool {
+    let primary = match colour {
+        BeamColour::White => return false,
+        BeamColour::Red => Primary::Red,
+        BeamColour::Green => Primary::Green,
+        BeamColour::Blue => Primary::Blue,
+    };
+    primary == block.colour
+}
+
+/// How near a beam must end to a block's face to have hit it.
+const HIT_TOLERANCE: f32 = 1.0;
+
+/// Whether a beam ending at `end` stopped on `aabb`.
+fn touches(aabb: &Aabb, end: Vec2) -> bool {
+    end.cmpge(aabb.min - HIT_TOLERANCE).all() && end.cmple(aabb.max + HIT_TOLERANCE).all()
+}
+
 pub fn damage_enemies(
     time: Res<Time>,
     mut events: MessageWriter<GameEvent>,
@@ -480,6 +501,7 @@ pub fn damage_enemies(
     prisms: Query<&Position, With<Prism>>,
     solids: Query<(&Solid, Option<&Traits>)>,
     mut enemies: Query<(&Position, &mut Enemy)>,
+    mut blocks: Query<&mut Breakable, With<Solid>>,
 ) {
     if !energy.firing {
         timer.0.reset();
@@ -505,6 +527,19 @@ pub fn damage_enemies(
     let prism = prisms.single().ok().map(|p| p.0);
     let loadout = BeamLoadout::from_abilities(*abilities, &powerups);
     let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle, &loadout);
+
+    for mut block in &mut blocks {
+        if trace
+            .segments
+            .iter()
+            .any(|&(_, end, colour)| breaks(colour, &block) && touches(&block.aabb, end))
+        {
+            block.health = block.health.saturating_sub(ticks);
+            events.write(GameEvent::BlockHit {
+                at: block.aabb.center(),
+            });
+        }
+    }
 
     // Same query, same order as the scene built above.
     let mut enemies: Vec<_> = enemies.iter_mut().collect();
@@ -984,5 +1019,20 @@ mod tests {
         assert!(damage >= 5, "expected several damage ticks, got {damage}");
         let energy = *app.world().resource::<BeamEnergy>();
         assert!(energy.current < BeamTuning::default().max_energy);
+    }
+
+    #[test]
+    fn only_a_block_s_own_split_colour_breaks_it_where_the_beam_stops() {
+        let aabb = Aabb::new(Vec2::new(300.0, -50.0), Vec2::new(340.0, 50.0));
+        let block = Breakable {
+            aabb,
+            colour: Primary::Green,
+            health: 1,
+        };
+        assert!(breaks(BeamColour::Green, &block));
+        assert!(!breaks(BeamColour::Red, &block));
+        assert!(!breaks(BeamColour::White, &block));
+        assert!(touches(&aabb, Vec2::new(300.0, 10.0)));
+        assert!(!touches(&aabb, Vec2::new(250.0, 10.0)));
     }
 }

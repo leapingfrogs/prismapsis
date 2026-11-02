@@ -85,6 +85,19 @@ pub enum GameEvent {
         at: Vec2,
         amount: f32,
     },
+    /// A beam of a block's colour damaged it.
+    BlockHit {
+        at: Vec2,
+    },
+    /// A block broke under a beam of its colour.
+    BlockBroken {
+        at: Vec2,
+        colour: Primary,
+    },
+    /// A crumbling platform gave way.
+    PlatformCrumbled {
+        at: Vec2,
+    },
     /// A colour came back to the level (white opens the exit).
     ColourRestored {
         hue: Hue,

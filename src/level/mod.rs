@@ -313,6 +313,21 @@ pub fn spawn_geometry(commands: &mut Commands, level: &Level) {
         if traits != Traits::default() {
             wall.insert(traits);
         }
+        crate::platforms::insert_changing(&mut wall, aabb, traits);
+    }
+    for mover in &level.movers {
+        let mut platform = commands.spawn((
+            Name::new("Moving platform"),
+            LevelGeometry,
+            Solid(mover.aabb),
+            mover.traits,
+            crate::platforms::Changing,
+            crate::platforms::Moving(*mover),
+            crate::platforms::PlatformVelocity::default(),
+        ));
+        if let Some(hue) = mover.hue {
+            platform.insert(Shade(hue));
+        }
     }
     for &(aabb, hue, traits) in &level.phantoms {
         let mut phantom =

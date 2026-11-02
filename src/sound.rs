@@ -273,6 +273,17 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
             kind: EnemyKind::Lens,
             at,
         } => vec![Cue::new(SoundId::LensDefeat).at(at)],
+        GameEvent::BlockHit { at } => vec![Cue::new(SoundId::EnemyHit).at(at).volume(0.5)],
+        // A block shatters like a lens, pitched to the colour that broke it.
+        GameEvent::BlockBroken { at, colour } => vec![
+            Cue::new(SoundId::LensDefeat)
+                .at(at)
+                .speed(lydian_speed(primary_degree(colour))),
+        ],
+        // A crumbling platform gives way with a low thud.
+        GameEvent::PlatformCrumbled { at } => {
+            vec![Cue::new(SoundId::WallBump).at(at).speed(0.6).volume(0.8)]
+        }
         GameEvent::OrbFired { at } => vec![Cue::new(SoundId::OrbFire).at(at)],
         GameEvent::OrbBlocked { at } => vec![Cue::new(SoundId::OrbBlocked).at(at)],
         GameEvent::Bounced { at, spin } => {

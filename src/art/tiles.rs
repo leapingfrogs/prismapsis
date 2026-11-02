@@ -6,14 +6,19 @@
 
 use super::backdrops::{BACKDROP_LAYERS, BACKDROP_PX, BACKDROP_UNITS_PER_PX, PARALLAX};
 use super::features::{FEATURE_LAYERS, Feature, FeatureCells};
+use super::figures::Sheet;
 use super::filtered;
 use super::paint::{Kind, Theme, linear, theme_index, themes};
+use super::phantoms::Glass;
+use super::sprites::{CELL_SIZE, Figure, POST_REACH, PX_PER_UNIT};
 use super::{BOTTOM_LEFT, BOTTOM_RIGHT, LAYERS, TOP_LEFT, TOP_RIGHT, layer, tint, variant_at};
 use crate::level::{Campaign, CurrentLevel, LevelGeometry, Scenery, Solid};
 use crate::light::{Hue, Phantom, Shade};
 use crate::physics::{Aabb, Traits};
+use crate::platforms::{BREAK_TICKS, Breakable, Changing, Crumbling, Moving};
 use crate::render::MainCamera;
 use crate::spectrum_view::Wash;
+use crate::spectrum_view::hue_colour;
 use bevy::asset::{RenderAssetUsages, embedded_asset, embedded_path};
 use bevy::ecs::system::SystemParam;
 use bevy::image::{
@@ -90,6 +95,9 @@ impl Plugin for TilesPlugin {
                     wash_tiles,
                     tint_background,
                     theme_backdrop,
+                    draw_changing,
+                    show_changing,
+                    theme_changing,
                 ),
             )
             .add_systems(Startup, spawn_backdrop.after(load_tiles))
@@ -402,8 +410,8 @@ fn draw_wall_tiles(
     tilesets: Option<Res<Tilesets>>,
     theme: ThemeInPlay,
     level: Res<CurrentLevel>,
-    added: Query<(), (Added<Solid>, Without<Phantom>)>,
-    walls: Query<(&Solid, Option<&Shade>, Option<&Traits>), Without<Phantom>>,
+    added: Query<(), (Added<Solid>, Without<Phantom>, Without<Changing>)>,
+    walls: Query<(&Solid, Option<&Shade>, Option<&Traits>), (Without<Phantom>, Without<Changing>)>,
     old: Query<Entity, With<WallMesh>>,
 ) {
     let Some(tilesets) = tilesets else { return };
@@ -438,8 +446,8 @@ fn draw_feature_tiles(
     tilesets: Option<Res<Tilesets>>,
     theme: ThemeInPlay,
     level: Res<CurrentLevel>,
-    added: Query<(), (Added<Solid>, Without<Phantom>)>,
-    walls: Query<(&Solid, Option<&Shade>, &Traits), Without<Phantom>>,
+    added: Query<(), (Added<Solid>, Without<Phantom>, Without<Changing>)>,
+    walls: Query<(&Solid, Option<&Shade>, &Traits), (Without<Phantom>, Without<Changing>)>,
     old: Query<Entity, With<FeatureMesh>>,
 ) {
     let Some(tilesets) = tilesets else { return };
@@ -609,6 +617,165 @@ fn theme_backdrop(
     }
     let wanted = tilesets.backdrop(theme.index());
     for mut material in &mut layers {
+        if material.0 != wanted {
+            material.0 = wanted.clone();
+        }
+    }
+}
+
+/// A changing platform drawn from the theme's features, so a new theme
+/// redraws it.
+#[derive(Component, Debug)]
+pub struct ChangingFeature;
+
+/// The rail a moving platform runs along.
+#[derive(Component, Debug)]
+pub struct Rail;
+
+/// How the rail behind a moving platform looks: a dim rod.
+const RAIL_COLOUR: Color = Color::srgb(0.4, 0.42, 0.48);
+
+/// How far a worn platform or a damaged block shakes (world units), and
+/// how fast (radians per second).
+const SHAKE: f32 = 1.2;
+const SHAKE_RATE: f32 = 55.0;
+
+/// Give each changing platform its own mesh: crumbling and moving ones from
+/// the theme's features, breakable blocks as cracked crystal in their
+/// colour. A moving platform also gets a rail along its track.
+#[allow(clippy::type_complexity)]
+fn draw_changing(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    tilesets: Option<Res<Tilesets>>,
+    glass: Option<Res<PhantomTiles>>,
+    sheet: Option<Res<Sheet>>,
+    theme: ThemeInPlay,
+    level: Res<CurrentLevel>,
+    added: Query<
+        (
+            Entity,
+            &Traits,
+            Option<&Shade>,
+            Option<&Crumbling>,
+            Option<&Breakable>,
+            Option<&Moving>,
+        ),
+        Added<Changing>,
+    >,
+) {
+    let (Some(tilesets), Some(glass)) = (tilesets, glass) else {
+        return;
+    };
+    let level = &level.0;
+    for (entity, &traits, shade, crumbling, breakable, moving) in &added {
+        let mut drawn = commands.entity(entity);
+        drawn.insert((
+            Transform::from_xyz(0.0, 0.0, FEATURE_DEPTH),
+            Visibility::default(),
+        ));
+        if let Some(block) = breakable {
+            let [r, g, b, _] = hue_colour(block.colour.into()).to_linear().to_f32_array();
+            let mesh = super::phantoms::mesh(&block.aabb, level.tile, Glass::Cracked, [r, g, b]);
+            drawn.insert((Mesh2d(meshes.add(mesh)), MeshMaterial2d(glass.0.clone())));
+            continue;
+        }
+        let Some(aabb) = crumbling
+            .map(|c| c.aabb)
+            .or_else(|| moving.map(|m| m.0.aabb))
+        else {
+            continue;
+        };
+        let cells = FeatureCells::new(
+            level.size,
+            level.tile,
+            &[(aabb, shade.map(|s| s.0), traits)],
+        );
+        drawn.insert((
+            ChangingFeature,
+            Mesh2d(meshes.add(cells.mesh())),
+            MeshMaterial2d(tilesets.features(theme.index())),
+        ));
+        if let (Some(moving), Some(sheet)) = (moving, sheet.as_deref()) {
+            commands.spawn((LevelGeometry, Rail, rail(sheet, &moving.0)));
+        }
+    }
+}
+
+/// A rod along a moving platform's whole track, behind it.
+fn rail(sheet: &Sheet, mover: &crate::level::format::Mover) -> impl Bundle {
+    let start = mover.aabb_at_offset(mover.low).center();
+    let end = mover.aabb_at_offset(mover.high).center();
+    let length = start.distance(end) + mover.aabb.size().dot(mover.axis.abs());
+    let mut sprite = sheet.sprite(Figure::Post, RAIL_COLOUR);
+    let inset = (CELL_SIZE / 2.0 - POST_REACH + 2.0) * PX_PER_UNIT;
+    sprite.rect = sprite
+        .rect
+        .map(|r| Rect::new(r.min.x, r.min.y + inset, r.max.x, r.max.y - inset));
+    sprite.custom_size = Some(Vec2::new(CELL_SIZE, length));
+    // The post stands upright; turn it to lie along a track across.
+    let turn = if mover.axis.x.abs() > 0.5 {
+        std::f32::consts::FRAC_PI_2
+    } else {
+        0.0
+    };
+    (
+        sprite,
+        Transform::from_translation(start.midpoint(end).extend(FEATURE_DEPTH - 0.05))
+            .with_rotation(Quat::from_rotation_z(turn)),
+    )
+}
+
+/// Move each moving platform's mesh with it; hide crumbled platforms and
+/// broken blocks; shake worn platforms and damaged blocks.
+#[allow(clippy::type_complexity)]
+fn show_changing(
+    time: Res<Time>,
+    mut platforms: Query<
+        (
+            Option<&Solid>,
+            Option<&Moving>,
+            Option<&Crumbling>,
+            Option<&Breakable>,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        With<Changing>,
+    >,
+) {
+    let wobble = (time.elapsed_secs() * SHAKE_RATE).sin() * SHAKE;
+    for (solid, moving, crumbling, breakable, mut transform, mut visibility) in &mut platforms {
+        visibility.set_if_neq(if solid.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+        let mut offset = match (solid, moving) {
+            (Some(solid), Some(moving)) => solid.0.min - moving.0.aabb.min,
+            _ => Vec2::ZERO,
+        };
+        let worn = crumbling.is_some_and(|c| c.left < c.landings)
+            || breakable.is_some_and(|b| b.health < BREAK_TICKS);
+        if worn {
+            offset.x += wobble;
+        }
+        transform.translation.x = offset.x;
+        transform.translation.y = offset.y;
+    }
+}
+
+/// Redraw changing platforms in a newly chosen theme.
+fn theme_changing(
+    tilesets: Option<Res<Tilesets>>,
+    theme: ThemeInPlay,
+    mut platforms: Query<&mut MeshMaterial2d<WorldMaterial>, With<ChangingFeature>>,
+) {
+    let Some(tilesets) = tilesets else { return };
+    if !theme.changed() {
+        return;
+    }
+    let wanted = tilesets.features(theme.index());
+    for mut material in &mut platforms {
         if material.0 != wanted {
             material.0 = wanted.clone();
         }
