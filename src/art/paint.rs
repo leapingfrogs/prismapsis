@@ -1005,15 +1005,17 @@ impl<'a> Painter<'a> {
 
 /// A sample of a theme's art, for reviewing it.
 ///
-/// Walls ('#') and scenery panels ('o', or a hue's letter in lower case
-/// for a panel of that hue) are laid out from `map`, with cells outside it
-/// counting as wall, and drawn at several stages of restoring
-/// colour, one above the other: none, red, red and green, then all.
+/// Walls ('#'), scenery panels ('o', or a hue's letter in lower case for a
+/// panel of that hue) and features (the default legend's '=', '^', '~'
+/// and '%') are laid out from `map`, with cells outside it counting as
+/// wall, and drawn at several stages of restoring colour, one above the
+/// other: none, red, red and green, then all.
 #[must_use]
 pub fn preview(theme: &Theme, map: &[&str]) -> Canvas {
     const STAGES: [[f32; 3]; 4] = [[0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [1.0; 3]];
     let walls = tileset(theme, Kind::Walls);
     let panels = tileset(theme, Kind::Panels);
+    let features = super::features::tileset(theme);
     let rows = map.len();
     let cols = map.iter().map(|r| r.chars().count()).max().unwrap_or(0);
     let cell = |c: i64, r: i64| {
@@ -1030,6 +1032,16 @@ pub fn preview(theme: &Theme, map: &[&str]) -> Canvas {
             .find_map(|(letter, hue)| (letter == ch).then_some(hue))
     };
     let is_panel = |c, r| cell(c, r).is_some_and(|ch| ch == 'o' || panel_hue(ch).is_some());
+    let feature_at = |c, r| {
+        use super::features::Feature;
+        match cell(c, r)? {
+            '=' => Some(Feature::Platform),
+            '^' => Some(Feature::Spring),
+            '~' => Some(Feature::Mud),
+            '%' => Some(Feature::Mirror),
+            _ => None,
+        }
+    };
     #[allow(clippy::cast_possible_truncation)]
     let (width, panel) = (cols as u32 * TILE_PX, rows as u32 * TILE_PX);
     let mut canvas = Canvas::new(width, panel * 4);
@@ -1053,6 +1065,18 @@ pub fn preview(theme: &Theme, map: &[&str]) -> Canvas {
                         over = [0, 1, 2].map(|i| over[i] * tint[i]);
                     }
                     let over = filtered(over, *wash);
+                    colour = [0, 1, 2].map(|i| colour[i] + (over[i] - colour[i]) * a);
+                }
+                let (col, row) = (i64::from(px / TILE_PX), i64::from(py / TILE_PX));
+                if let Some(feature) = feature_at(col, row) {
+                    use super::features::{ABOVE, BELOW, LEFT, RIGHT};
+                    let mask = [(ABOVE, 0, -1), (BELOW, 0, 1), (LEFT, -1, 0), (RIGHT, 1, 0)]
+                        .iter()
+                        .filter(|&&(_, dc, dr)| feature_at(col + dc, row + dr) == Some(feature))
+                        .fold(0, |mask, &(bit, ..)| mask | bit);
+                    let top = u32::from(feature.layer(mask)) * TILE_PX;
+                    let [r, g, b, a] = features.get(px % TILE_PX, top + py % TILE_PX);
+                    let over = filtered(linear([r, g, b]), *wash);
                     colour = [0, 1, 2].map(|i| colour[i] + (over[i] - colour[i]) * a);
                 }
                 let [r, g, b] = colour.map(srgb);

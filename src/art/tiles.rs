@@ -4,12 +4,13 @@
 //! around it are filled, drawn through a shader that holds back each hue
 //! until it has been restored.
 
+use super::features::{FEATURE_LAYERS, Feature, FeatureCells};
 use super::filtered;
 use super::paint::{Kind, Theme, linear, theme_index, themes};
 use super::{BOTTOM_LEFT, BOTTOM_RIGHT, LAYERS, TOP_LEFT, TOP_RIGHT, layer, tint, variant_at};
 use crate::level::{Campaign, CurrentLevel, LevelGeometry, Scenery, Solid};
 use crate::light::{Hue, Phantom, Shade};
-use crate::physics::Aabb;
+use crate::physics::{Aabb, Traits};
 use crate::spectrum_view::Wash;
 use bevy::asset::{RenderAssetUsages, embedded_asset, embedded_path};
 use bevy::ecs::system::SystemParam;
@@ -36,6 +37,16 @@ const TILESETS: [[&[u8]; 2]; 3] = [
     ],
 ];
 
+/// Each theme's features (walls with traits), painted by `just art`.
+const FEATURES: [&[u8]; 3] = [
+    include_bytes!("../../assets/art/quarry/features.png"),
+    include_bytes!("../../assets/art/caverns/features.png"),
+    include_bytes!("../../assets/art/observatory/features.png"),
+];
+
+/// Features are drawn just in front of the walls they sit against.
+const FEATURE_DEPTH: f32 = 0.1;
+
 /// Scenery is drawn behind the walls.
 const PANEL_DEPTH: f32 = -1.0;
 
@@ -53,6 +64,7 @@ impl Plugin for TilesPlugin {
                 (
                     draw_wall_tiles,
                     draw_panel_tiles,
+                    draw_feature_tiles,
                     wash_tiles,
                     tint_background,
                 ),
@@ -84,15 +96,20 @@ impl Material2d for WorldMaterial {
     }
 }
 
-/// The materials walls and scenery are drawn with: each theme's walls and
-/// panels, in campaign order.
+/// The materials walls, scenery and features are drawn with: each theme's
+/// walls and panels, then its features, in campaign order.
 #[derive(Resource, Debug)]
-pub struct Tilesets(pub Vec<[Handle<WorldMaterial>; 2]>);
+pub struct Tilesets(pub Vec<[Handle<WorldMaterial>; 3]>);
 
 impl Tilesets {
     /// The material for `kind` in theme `theme`.
     fn material(&self, theme: usize, kind: Kind) -> Handle<WorldMaterial> {
         self.0[theme][kind as usize].clone()
+    }
+
+    /// The material for features in theme `theme`.
+    fn features(&self, theme: usize) -> Handle<WorldMaterial> {
+        self.0[theme][2].clone()
     }
 }
 
@@ -133,16 +150,20 @@ impl ThemeInPlay<'_> {
 #[derive(Component, Debug)]
 pub struct WallMesh;
 
+/// The entity holding the features' mesh.
+#[derive(Component, Debug)]
+pub struct FeatureMesh;
+
 /// The entity holding the scenery panels' mesh.
 #[derive(Component, Debug)]
 pub struct PanelMesh;
 
-/// Decode a tileset whose tiles are stacked top to bottom into an array
-/// texture, one layer per tile.
+/// Decode a tileset whose `layers` tiles are stacked top to bottom into an
+/// array texture, one layer per tile.
 ///
 /// # Errors
-/// If the image can't be decoded or isn't a stack of `LAYERS` tiles.
-pub fn tileset_image(png: &[u8]) -> Result<Image, String> {
+/// If the image can't be decoded or isn't a stack of `layers` tiles.
+pub fn tileset_image(png: &[u8], layers: u16) -> Result<Image, String> {
     let mut image = Image::from_buffer(
         png,
         ImageType::Extension("png"),
@@ -153,7 +174,7 @@ pub fn tileset_image(png: &[u8]) -> Result<Image, String> {
     )
     .map_err(|e| e.to_string())?;
     image
-        .reinterpret_stacked_2d_as_array(LAYERS.into())
+        .reinterpret_stacked_2d_as_array(layers.into())
         .map_err(|e| e.to_string())?;
     Ok(image)
 }
@@ -165,12 +186,12 @@ fn load_tiles(
     mut images: Option<ResMut<Assets<Image>>>,
     mut materials: ResMut<Assets<WorldMaterial>>,
 ) {
-    let mut load = |kind: Kind, png: &[u8]| {
-        let tiles = match (images.as_mut(), tileset_image(png)) {
+    let mut load = |name: &str, png: &[u8], layers: u16| {
+        let tiles = match (images.as_mut(), tileset_image(png, layers)) {
             (Some(images), Ok(image)) => images.add(image),
             (None, _) => Handle::default(),
             (_, Err(problem)) => {
-                error!("{} tileset: {problem}", kind.name());
+                error!("{name} tileset: {problem}");
                 Handle::default()
             }
         };
@@ -181,7 +202,14 @@ fn load_tiles(
     };
     let themes = TILESETS
         .iter()
-        .map(|&[walls, panels]| [load(Kind::Walls, walls), load(Kind::Panels, panels)])
+        .zip(FEATURES)
+        .map(|(&[walls, panels], features)| {
+            [
+                load(Kind::Walls.name(), walls, LAYERS),
+                load(Kind::Panels.name(), panels, LAYERS),
+                load("features", features, FEATURE_LAYERS),
+            ]
+        })
         .collect();
     commands.insert_resource(Tilesets(themes));
 }
@@ -320,16 +348,18 @@ fn draw_wall_tiles(
     theme: ThemeInPlay,
     level: Res<CurrentLevel>,
     added: Query<(), (Added<Solid>, Without<Phantom>)>,
-    walls: Query<(&Solid, Option<&Shade>), Without<Phantom>>,
+    walls: Query<(&Solid, Option<&Shade>, Option<&Traits>), Without<Phantom>>,
     old: Query<Entity, With<WallMesh>>,
 ) {
     let Some(tilesets) = tilesets else { return };
     if added.is_empty() && !theme.choice.is_changed() {
         return;
     }
+    // Walls with traits draw as features instead.
     let walls: Vec<_> = walls
         .iter()
-        .map(|(s, shade)| (s.0, shade.map(|s| s.0)))
+        .filter(|(.., traits)| traits.is_none_or(|&t| Feature::of(t).is_none()))
+        .map(|(s, shade, _)| (s.0, shade.map(|s| s.0)))
         .collect();
     let level = &level.0;
     let cells = Cells::new(Kind::Walls, &theme.theme(), level.size, level.tile, &walls);
@@ -344,6 +374,43 @@ fn draw_wall_tiles(
             Transform::default(),
         ),
     );
+}
+
+/// Rebuild the features whenever walls are spawned.
+fn draw_feature_tiles(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    tilesets: Option<Res<Tilesets>>,
+    theme: ThemeInPlay,
+    level: Res<CurrentLevel>,
+    added: Query<(), (Added<Solid>, Without<Phantom>)>,
+    walls: Query<(&Solid, Option<&Shade>, &Traits), Without<Phantom>>,
+    old: Query<Entity, With<FeatureMesh>>,
+) {
+    let Some(tilesets) = tilesets else { return };
+    if added.is_empty() && !theme.choice.is_changed() {
+        return;
+    }
+    let walls: Vec<_> = walls
+        .iter()
+        .map(|(s, shade, &traits)| (s.0, shade.map(|s| s.0), traits))
+        .collect();
+    let level = &level.0;
+    let cells = FeatureCells::new(level.size, level.tile, &walls);
+    for entity in &old {
+        commands.entity(entity).despawn();
+    }
+    if cells.is_empty() {
+        return;
+    }
+    commands.spawn((
+        LevelGeometry,
+        Name::new("Features"),
+        FeatureMesh,
+        Mesh2d(meshes.add(cells.mesh())),
+        MeshMaterial2d(tilesets.features(theme.index())),
+        Transform::from_xyz(0.0, 0.0, FEATURE_DEPTH),
+    ));
 }
 
 /// Rebuild the scenery panels whenever scenery is spawned.
@@ -365,6 +432,13 @@ fn draw_panel_tiles(
         .iter()
         .map(|(s, shade)| (s.0, shade.map(|s| s.0)))
         .collect();
+    // With no scenery there's nothing to draw, and Bevy warns about empty meshes.
+    if scenery.is_empty() {
+        for entity in &old {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
     let level = &level.0;
     let cells = Cells::new(
         Kind::Panels,
@@ -570,13 +644,19 @@ mod tests {
     #[test]
     fn the_committed_tileset_loads_as_layers() {
         assert_eq!(TILESETS.len(), themes().len(), "a tileset for every theme");
-        for png in TILESETS.iter().flatten() {
-            let image = tileset_image(png).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(FEATURES.len(), themes().len(), "features for every theme");
+        let sets = TILESETS
+            .iter()
+            .flatten()
+            .map(|png| (png, LAYERS))
+            .chain(FEATURES.iter().map(|png| (png, FEATURE_LAYERS)));
+        for (png, layers) in sets {
+            let image = tileset_image(png, layers).unwrap_or_else(|e| panic!("{e}"));
             assert_eq!(
                 image.texture_descriptor.size.depth_or_array_layers,
-                u32::from(LAYERS)
+                u32::from(layers)
             );
         }
-        assert!(tileset_image(b"not a png").is_err());
+        assert!(tileset_image(b"not a png", LAYERS).is_err());
     }
 }

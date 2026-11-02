@@ -1,0 +1,39 @@
+# A dev level for trying the tile kinds: a muddy stretch of floor, a green
+# one-way phantom step above it, a spring pad up to a shelf whose underside
+# is a mirror, one-way platforms up to the exit, and a mirror pillar to
+# reflect the beam off. See "Tile kinds" in docs/design.md.
+name = "Workshop"
+
+map = '''
+################################################
+#                                              #
+#                                           XXX#
+#                                           XXX#
+#                                           XXX#
+#                                              #
+#                                 =============#
+#                                              #
+#                                              #
+#                                              #
+#                             ===============  #
+#                                              #
+#                                              #
+#                           K                  #
+#                         ############         #
+#                         %%%%%%%%%%%%         #
+#                                              #
+#                                              #
+#                                          %%  #
+#           oooooo                         %%  #
+#                                          %%  #
+#                                          %%  #
+#                                          %%  #
+#                                          %%  #
+#                                          %%  #
+#  @                 ^^^^         1        %%  #
+#########~~~~~~~~~~~############################
+'''
+
+[legend]
+"1" = { lens = "red" }
+"o" = { phantom = "green", one_way = true, height = 10 }

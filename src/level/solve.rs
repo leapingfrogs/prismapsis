@@ -22,7 +22,7 @@ use crate::beam::{BeamTuning, MAX_BEAM_LENGTH};
 use crate::enemy::{EnemyTuning, LENS_RADIUS, line_of_sight};
 use crate::hero::HERO_RADIUS;
 use crate::light::{Hue, LightTuning, Primary};
-use crate::physics::{self, Aabb, Body, BounceTuning, MAX_SPIN};
+use crate::physics::{self, Aabb, Body, BounceTuning, MAX_SPIN, Surface};
 use crate::powerup::{PICKUP_RADIUS, PowerUp};
 use crate::prism::PrismTuning;
 
@@ -238,12 +238,28 @@ fn hero_box(at: Vec2) -> Aabb {
 }
 
 /// The solids within `WINDOW` of `x`.
-fn nearby(solids: &[Aabb], x: f32) -> Vec<Aabb> {
+fn nearby(solids: &[Surface], x: f32) -> Vec<Surface> {
     solids
         .iter()
-        .filter(|s| s.max.x > x - WINDOW && s.min.x < x + WINDOW)
+        .filter(|s| s.aabb.max.x > x - WINDOW && s.aabb.min.x < x + WINDOW)
         .copied()
         .collect()
+}
+
+/// The solids that block the hero from every side, and their boxes.
+fn blocking(solids: &[Surface]) -> impl Iterator<Item = &Aabb> {
+    solids.iter().filter(|s| !s.traits.one_way).map(|s| &s.aabb)
+}
+
+/// Whether moving down from `from` to `to` lands on one of the one-way
+/// solids: it's in the way at `to` and was wholly below the hero at `from`.
+fn lands_on_one_way(solids: &[Surface], from: Vec2, to: Vec2) -> bool {
+    to.y < from.y
+        && solids.iter().any(|s| {
+            s.traits.one_way
+                && s.aabb.overlaps(&hero_box(to))
+                && from.y - HERO_RADIUS >= s.aabb.max.y
+        })
 }
 
 impl<'a> World<'a> {
@@ -274,23 +290,24 @@ impl<'a> World<'a> {
     }
 
     /// Walls, and the phantoms whose hue is restored.
-    fn solids(&self, restored: Restored) -> Vec<Aabb> {
+    fn solids(&self, restored: Restored) -> Vec<Surface> {
         self.level
             .walls
             .iter()
-            .map(|&(aabb, _)| aabb)
+            .map(|&(aabb, _, traits)| Surface { aabb, traits })
             .chain(
                 self.level
                     .phantoms
                     .iter()
-                    .filter(|&&(_, hue)| is_restored(hue, restored))
-                    .map(|&(aabb, _)| aabb),
+                    .filter(|&&(_, hue, _)| is_restored(hue, restored))
+                    .map(|&(aabb, _, traits)| Surface { aabb, traits }),
             )
             .collect()
     }
 
     /// Note everything the hero touches at `at`, and the lenses it can shoot
-    /// from there if `sight`.
+    /// from there if `sight`. Every solid blocks the beam, mirrors included,
+    /// so what it can reach is never overstated.
     fn touch(
         &self,
         at: Vec2,
@@ -330,16 +347,19 @@ impl<'a> World<'a> {
     }
 
     /// Follow one bounce from `from` with `vel` until the hero lands,
-    /// noting what it touches on the way. `None` if it never lands.
+    /// noting what it touches on the way. Returns where it lands and the
+    /// speed it bounces up at, which springs and mud change; `None` if it
+    /// never lands.
     fn arc(
         &self,
         from: Vec2,
         vel: Vec2,
         spin: i8,
         restored: Restored,
-        solids: &[Aabb],
+        solids: &[Surface],
+        boxes: &[Aabb],
         out: &mut Explored,
-    ) -> Option<Vec2> {
+    ) -> Option<(Vec2, f32)> {
         let mut body = Body {
             pos: from,
             vel,
@@ -354,9 +374,9 @@ impl<'a> World<'a> {
                 near = nearby(solids, centre);
             }
             let contacts = physics::step(&mut body, &mut spin, &self.bounce, &near, self.dt);
-            self.touch(body.pos, restored, solids, step % SIGHT_EVERY == 0, out);
+            self.touch(body.pos, restored, boxes, step % SIGHT_EVERY == 0, out);
             if contacts.floor {
-                return Some(body.pos);
+                return Some((body.pos, body.vel.y));
             }
         }
         None
@@ -366,37 +386,41 @@ impl<'a> World<'a> {
     /// falling from rest.
     fn bounce(&self, restored: Restored, seeds: &[Vec2], out: &mut Explored) {
         let solids = self.solids(restored);
+        let boxes: Vec<Aabb> = solids.iter().map(|s| s.aabb).collect();
         let key = |at| Self::key(false, at);
         let mut queue = VecDeque::new();
         for &seed in seeds {
             // A phantom that has just turned solid around the hero waits for
             // it to leave; the hero's other places cover where it goes.
-            if solids.iter().any(|s| s.overlaps(&hero_box(seed))) {
+            if blocking(&solids).any(|s| s.overlaps(&hero_box(seed))) {
                 continue;
             }
-            if let Some(landing) = self.arc(seed, Vec2::ZERO, 0, restored, &solids, out)
+            if let Some((landing, launch)) =
+                self.arc(seed, Vec2::ZERO, 0, restored, &solids, &boxes, out)
                 && out.keys.insert(key(landing))
             {
-                queue.push_back(landing);
+                queue.push_back((landing, launch));
             }
         }
-        let launch = self.bounce.bounce_speed();
-        while let Some(from) = queue.pop_front() {
+        while let Some((from, launch)) = queue.pop_front() {
             out.places.push(from);
             for spin in -self.max_spin..=self.max_spin {
                 let vel = Vec2::new(self.bounce.horizontal_speed(spin), launch);
-                if let Some(landing) = self.arc(from, vel, spin, restored, &solids, out)
+                if let Some((landing, launch)) =
+                    self.arc(from, vel, spin, restored, &solids, &boxes, out)
                     && out.keys.insert(key(landing))
                 {
-                    queue.push_back(landing);
+                    queue.push_back((landing, launch));
                 }
             }
         }
     }
 
-    /// Everywhere open a hovering hero can move to from `seeds`.
+    /// Everywhere open a hovering hero can move to from `seeds`. It rises
+    /// through one-way solids but can't move down into one from above.
     fn hover(&self, restored: Restored, seeds: &[Vec2], out: &mut Explored) {
         let solids = self.solids(restored);
+        let boxes: Vec<Aabb> = solids.iter().map(|s| s.aabb).collect();
         let size = self.level.size;
         // Bounded by the level's size, so the casts cannot truncate.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -409,7 +433,7 @@ impl<'a> World<'a> {
         let open = |at: Vec2| {
             at.cmpge(Vec2::splat(HERO_RADIUS)).all()
                 && at.cmple(size - HERO_RADIUS).all()
-                && !solids.iter().any(|s| s.overlaps(&hero_box(at)))
+                && !blocking(&solids).any(|s| s.overlaps(&hero_box(at)))
         };
         let mut seen = vec![false; cols * rows];
         let mut queue = VecDeque::new();
@@ -434,7 +458,7 @@ impl<'a> World<'a> {
             out.places.push(at);
             out.keys.insert(Self::key(true, at));
             let sight = col % SIGHT_EVERY == 0 && row % SIGHT_EVERY == 0;
-            self.touch(at, restored, &solids, sight, out);
+            self.touch(at, restored, &boxes, sight, out);
             let neighbours = [
                 (col.wrapping_sub(1), row),
                 (col + 1, row),
@@ -442,7 +466,12 @@ impl<'a> World<'a> {
                 (col, row + 1),
             ];
             for (c, r) in neighbours {
-                if c < cols && r < rows && !seen[r * cols + c] && open(place(c, r)) {
+                if c < cols
+                    && r < rows
+                    && !seen[r * cols + c]
+                    && open(place(c, r))
+                    && !lands_on_one_way(&solids, at, place(c, r))
+                {
                     seen[r * cols + c] = true;
                     queue.push_back((c, r));
                 }
@@ -471,7 +500,7 @@ impl<'a> World<'a> {
         let phantoms = level
             .phantoms
             .iter()
-            .map(|&(_, hue)| is_restored(hue, state.restored))
+            .map(|&(_, hue, _)| is_restored(hue, state.restored))
             .collect();
         let pickups = level
             .pickups
@@ -729,6 +758,43 @@ mod tests {
         );
         // The phantom steps halve the climb, so they're comfortable.
         assert!(solve_within(&level(&stepped(), ""), Limits::COMFORT).is_ok());
+    }
+
+    #[test]
+    fn springs_and_mud_change_what_a_bounce_reaches() {
+        // A spring under the start sends the hero up to the high ledge.
+        let sprung = HIGH.replacen(
+            "#  @         #\n##############",
+            "#  @         #\n###^^^########",
+            1,
+        );
+        assert!(solve(&level(&sprung, "")).is_ok());
+        // A muddy floor can't reach the ledge a plain one can.
+        let muddy = LEDGE.replacen(
+            "#  @         #\n##############",
+            "#  @         #\n#~~~~~~~~~~~~#",
+            1,
+        );
+        assert_eq!(solve(&level(&muddy, "")), Err(Unsolvable::ExitOutOfReach));
+    }
+
+    #[test]
+    fn the_hero_bounces_up_through_one_way_platforms() {
+        // A shelf across the room at 200: as a wall it caps the bounce below
+        // the ledge, but the hero can rise through a one-way platform and
+        // bounce on from its top.
+        let shelf = |row: &str| {
+            LEDGE.replacen(
+                "#            #\n#            #\n#            #\n#  @",
+                &format!("{row}\n#            #\n#            #\n#  @"),
+                1,
+            )
+        };
+        assert!(solve(&level(&shelf("#============#"), "")).is_ok());
+        assert_eq!(
+            solve(&level(&shelf("##############"), "")),
+            Err(Unsolvable::ExitOutOfReach)
+        );
     }
 
     #[test]
