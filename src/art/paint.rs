@@ -29,6 +29,11 @@ pub enum WallStyle {
     /// Veined marble blocks with gold trim on top and carved dentils
     /// underneath.
     Marble,
+    /// Riveted iron plates with glowing seams, a copper rail on top and an
+    /// iron lip underneath.
+    Plates,
+    /// Blocks of ice with snow on top and icicles underneath.
+    Ice,
 }
 
 /// How a theme's scenery panels are made.
@@ -40,6 +45,10 @@ pub enum PanelStyle {
     Geode,
     /// A gilt frame round stained glass in many colours.
     Stained,
+    /// An iron frame round a grating with a furnace glowing behind it.
+    Grating,
+    /// An ice frame round frosted glass.
+    Frost,
 }
 
 /// What a theme's walls and scenery are made of.
@@ -141,6 +150,38 @@ pub fn themes() -> Vec<Theme> {
                 [0.42, 0.18, 0.55],
             ],
             backdrop: [0.06, 0.05, 0.16],
+        },
+        Theme {
+            name: "foundry",
+            seed: 4,
+            walls: WallStyle::Plates,
+            panels: PanelStyle::Grating,
+            stone: [[0.44, 0.46, 0.5], [0.34, 0.36, 0.4], [0.22, 0.23, 0.27]],
+            mortar: [0.12, 0.12, 0.14],
+            moss: [[0.55, 0.32, 0.12], [0.95, 0.62, 0.25]],
+            crystal: [
+                [[0.85, 0.3, 0.05], [1.0, 0.75, 0.3]],
+                [[0.1, 0.5, 0.6], [0.5, 0.95, 1.0]],
+            ],
+            glass: [[0.55, 0.25, 0.1], [0.95, 0.6, 0.3]],
+            panes: &[],
+            backdrop: [0.07, 0.05, 0.05],
+        },
+        Theme {
+            name: "glacier",
+            seed: 5,
+            walls: WallStyle::Ice,
+            panels: PanelStyle::Frost,
+            stone: [[0.66, 0.8, 0.9], [0.46, 0.6, 0.74], [0.3, 0.4, 0.54]],
+            mortar: [0.3, 0.42, 0.55],
+            moss: [[0.82, 0.87, 0.92], [0.98, 0.99, 1.0]],
+            crystal: [
+                [[0.2, 0.55, 0.75], [0.6, 0.9, 1.0]],
+                [[0.45, 0.3, 0.75], [0.8, 0.7, 1.0]],
+            ],
+            glass: [[0.3, 0.36, 0.44], [0.52, 0.6, 0.68]],
+            panes: &[],
+            backdrop: [0.03, 0.06, 0.12],
         },
     ]
 }
@@ -412,7 +453,52 @@ impl<'a> Painter<'a> {
             WallStyle::Blocks => self.grass_and_shadow(x, y, mask),
             WallStyle::Rock => self.fungus_and_stalactites(x, y, mask),
             WallStyle::Marble => self.dentils_and_shadow(x, y, mask),
+            WallStyle::Plates => self.lip_and_shadow(x, y, mask),
+            WallStyle::Ice => self.icicles(x, y, mask),
         }
+    }
+
+    /// Under a ledge: a dark iron lip with rivets, then a soft shadow. Above
+    /// a floor, nothing.
+    #[allow(clippy::cast_possible_truncation)]
+    fn lip_and_shadow(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+        if mask & bit_across(x, y) == 0 || y < CENTRE {
+            return [0.0; 4];
+        }
+        let down = y - CENTRE;
+        if down < 4.0 {
+            let rivet = (x.rem_euclid(16.0) - 8.0).hypot(down - 2.0) < 1.3;
+            let shade = if rivet {
+                0.9
+            } else {
+                0.55 - 0.05 * down as f32
+            };
+            return opaque(scale(self.theme.stone[2], shade));
+        }
+        let depth = ((down - 4.0) / 16.0).min(1.0);
+        [0.0, 0.0, 0.0, (0.5 * (1.0 - depth).powi(2)) as f32]
+    }
+
+    /// Icicles hanging from a ledge, clear at their tips, then a faint
+    /// shadow. Above a floor, nothing.
+    #[allow(clippy::cast_possible_truncation)]
+    fn icicles(&self, x: f64, y: f64, mask: u8) -> [f32; 4] {
+        let theme = self.theme;
+        if mask & bit_across(x, y) == 0 || y < CENTRE {
+            return [0.0; 4];
+        }
+        let column = (x / 6.0).floor();
+        let roll = f64::from(unit(theme.seed, column as i64, 17));
+        let (length, width) = (3.0 + 22.0 * roll * roll, 1.2 + 1.8 * roll);
+        let down = y - CENTRE;
+        let dx = x - (column * 6.0 + 3.0);
+        if down < length && dx.abs() < width * (1.0 - down / length) {
+            let lit = if dx < 0.0 { 1.1 } else { 0.85 };
+            let clear = (0.95 - 0.5 * down / length) as f32;
+            return translucent(scale(theme.stone[0], lit), clear);
+        }
+        let depth = (down / 16.0).min(1.0);
+        [0.0, 0.0, 0.0, (0.3 * (1.0 - depth).powi(2)) as f32]
     }
 
     /// Under a ledge: a row of carved dentils, then a soft shadow. Above a
@@ -517,6 +603,8 @@ impl<'a> Painter<'a> {
                 WallStyle::Blocks => self.stone(x, y),
                 WallStyle::Rock => self.rock(x, y),
                 WallStyle::Marble => self.marble(x, y),
+                WallStyle::Plates => self.plates(x, y),
+                WallStyle::Ice => self.ice(x, y),
             });
 
         // Deeper inside a wall is darker.
@@ -525,7 +613,7 @@ impl<'a> Painter<'a> {
         colour = scale(colour, 1.0 - 0.22 * depth);
 
         let top = y >= CENTRE && mask & bit_across(x, y) == 0;
-        if top && theme.walls == WallStyle::Marble {
+        if top && matches!(theme.walls, WallStyle::Marble | WallStyle::Plates) {
             // A band of gold trim along top surfaces, brightest at the edge.
             let below_surface = y - CENTRE;
             if below_surface < TRIM {
@@ -617,6 +705,40 @@ impl<'a> Painter<'a> {
         let theme = self.theme;
         let (cx, cy) = (x - CENTRE, y - CENTRE);
         match (theme.walls, variant) {
+            // A porthole: a ring of rivets round dark glass with the
+            // furnace glowing through it.
+            (WallStyle::Plates, 1) => {
+                let radius = cx.hypot(cy);
+                if radius < 12.0 {
+                    let glow = (1.0 - radius / 12.0) as f32;
+                    Some(lerp(
+                        scale(theme.mortar, 1.5),
+                        theme.crystal[0][1],
+                        glow * glow,
+                    ))
+                } else if radius < 17.0 {
+                    let angle = cy.atan2(cx).rem_euclid(TAU / 8.0) - TAU / 16.0;
+                    let rivet = (radius - 14.5).abs() < 1.6 && (angle * radius).abs() < 1.6;
+                    Some(scale(theme.stone[2], if rivet { 1.6 } else { 0.9 }))
+                } else {
+                    None
+                }
+            }
+            // A vent: slots with the furnace glowing behind them.
+            (WallStyle::Plates, 2) => {
+                let inside = cx.abs() < 18.0 && cy.abs() < 14.0;
+                inside.then(|| {
+                    if (cy + 14.0).rem_euclid(7.0) < 3.0 {
+                        lerp(
+                            theme.crystal[0][0],
+                            theme.crystal[0][1],
+                            (1.0 - cx.abs() / 18.0) as f32,
+                        )
+                    } else {
+                        scale(theme.stone[2], 0.7)
+                    }
+                })
+            }
             // A gold rosette round a lapis centre.
             (WallStyle::Marble, 1) => {
                 let radius = cx.hypot(cy);
@@ -645,7 +767,9 @@ impl<'a> Painter<'a> {
                 }
             }
             (_, 1) => Self::cluster(cx, cy, theme.crystal[0], &CLUSTER),
-            (WallStyle::Rock, 2) => Self::cluster(cx, cy, theme.crystal[1], &CLUSTER_MIRRORED),
+            (WallStyle::Rock | WallStyle::Ice, 2) => {
+                Self::cluster(cx, cy, theme.crystal[1], &CLUSTER_MIRRORED)
+            }
             // A darker block with a crack running down and across it. The
             // block is the one wholly inside the tile, on the second row.
             (WallStyle::Blocks, 2) => {
@@ -688,6 +812,81 @@ impl<'a> Painter<'a> {
                 }
             })
         })
+    }
+
+    /// Iron plates, staggered and joined by dark seams, with a
+    /// rivet in each corner lit from the top left and a brushed grain.
+    #[allow(clippy::cast_possible_truncation)]
+    fn plates(&self, x: f64, y: f64) -> Rgb {
+        let theme = self.theme;
+        let size = f64::from(TILE_PX) / 2.0;
+        // Plates are a tile wide and half a tile tall, staggered by row.
+        let row = (y / size).floor();
+        let shift = if row.rem_euclid(2.0) == 0.0 {
+            0.0
+        } else {
+            size
+        };
+        let wide = f64::from(TILE_PX);
+        let (lx, ly) = ((x + shift).rem_euclid(wide), y.rem_euclid(size));
+        if lx < 1.5 || ly < 1.5 {
+            return theme.mortar;
+        }
+        let plate = (((x + shift) / wide).floor() as i64, row as i64);
+        let mut colour = lerp(
+            theme.stone[0],
+            theme.stone[1],
+            unit(theme.seed, plate.0.rem_euclid(2), plate.1.rem_euclid(2)),
+        );
+        // Brushed: fine streaks running across.
+        colour = scale(
+            colour,
+            1.0 + 0.06 * Self::periodic(&self.grain, x * 0.2, y * 3.0, 6.0),
+        );
+        for (rx, ry) in [
+            (6.0, 6.0),
+            (wide - 6.0, 6.0),
+            (6.0, size - 6.0),
+            (wide - 6.0, size - 6.0),
+        ] {
+            let (dx, dy) = (lx - rx, ly - ry);
+            if dx.hypot(dy) < 2.2 {
+                let lit = (dx * LIGHT[0] + dy * LIGHT[1]) / 2.2;
+                return scale(theme.stone[0], (1.0 + 0.4 * lit) as f32);
+            }
+        }
+        // Each plate is lit along its top and left, shaded at its bottom.
+        if ly < 3.5 || lx < 3.5 {
+            colour = scale(colour, 1.1);
+        } else if ly > size - 3.0 || lx > wide - 3.0 {
+            colour = scale(colour, 0.82);
+        }
+        colour
+    }
+
+    /// Ice: big blocks with soft joints, clouded depths and fine
+    /// fractures, brighter towards each block's top.
+    #[allow(clippy::cast_possible_truncation)]
+    fn ice(&self, x: f64, y: f64) -> Rgb {
+        let theme = self.theme;
+        let row = (y / 40.0).floor();
+        let offset = if row.rem_euclid(2.0) == 0.0 {
+            0.0
+        } else {
+            40.0
+        };
+        let along = (x + offset).rem_euclid(f64::from(TILE_PX));
+        let (lx, ly) = (along % 80.0, y % 40.0);
+        if lx < 1.2 || ly < 1.2 {
+            return lerp(theme.stone[1], theme.mortar, 0.5);
+        }
+        let cloud = Self::periodic(&self.grain, x, y, 4.0) * 0.5 + 0.5;
+        let mut colour = lerp(theme.stone[1], theme.stone[0], 0.3 + 0.5 * cloud);
+        // Fractures: bright where they catch the light.
+        if Self::periodic(&self.wear, x, y, 3.0).abs() < 0.012 {
+            colour = lerp(colour, theme.moss[1], 0.6);
+        }
+        scale(colour, 1.08 - 0.12 * (ly / 40.0) as f32)
     }
 
     /// Polished marble: tall staggered blocks with fine joints, faint veins,
@@ -744,7 +943,7 @@ impl<'a> Painter<'a> {
             let rim = (1.0 - edge / FRAME) as f32;
             let grain = Self::periodic(&self.grain, x, y, 8.0);
             let body = match self.theme.panels {
-                PanelStyle::Leaded => self.theme.stone[1],
+                PanelStyle::Leaded | PanelStyle::Grating | PanelStyle::Frost => self.theme.stone[1],
                 PanelStyle::Geode => self.rock(x, y),
                 PanelStyle::Stained => scale(self.theme.moss[1], 1.6),
             };
@@ -759,6 +958,8 @@ impl<'a> Painter<'a> {
             PanelStyle::Leaded => self.glass(x, y, variant),
             PanelStyle::Geode => self.geode(x, y, edge - FRAME, variant),
             PanelStyle::Stained => self.stained(x, y, variant),
+            PanelStyle::Grating => self.grating(x, y, variant),
+            PanelStyle::Frost => self.frost(x, y, variant),
         };
         let mut colour = scale(inside, 0.8 + 0.2 * depth);
         // The frame shades the glass below its top edge; light catches the
@@ -919,6 +1120,100 @@ impl<'a> Painter<'a> {
         colour = scale(colour, 1.0 + 0.12 * Self::periodic(&self.grain, x, y, 6.0));
         // Glass is brighter at each pane's heart.
         scale(colour, 1.15 - 0.02 * near[0].0.min(10.0) as f32)
+    }
+
+    /// A grating of crossed iron bars with a furnace glowing behind, a cog
+    /// or a fan in the variants, and bars missing in the last.
+    #[allow(clippy::cast_possible_truncation)]
+    fn grating(&self, x: f64, y: f64, variant: u16) -> Rgb {
+        let theme = self.theme;
+        let (cx, cy) = (x - CENTRE, y - CENTRE);
+        let radius = cx.hypot(cy);
+        let flicker = Self::periodic(&self.grain, x, y, 3.0) * 0.5 + 0.5;
+        let glow = scale(
+            lerp(theme.glass[0], theme.glass[1], 0.4 + 0.6 * flicker),
+            0.6,
+        );
+        let iron = scale(theme.stone[2], 0.6);
+        match variant {
+            // A cog: teeth round a hub with a hole.
+            1 if radius < 26.0 => {
+                let teeth = if (cy.atan2(cx) * 10.0).sin() > 0.0 {
+                    25.0
+                } else {
+                    20.0
+                };
+                if radius < 5.0 {
+                    return glow;
+                }
+                if radius < teeth {
+                    let lit = (cx * LIGHT[0] + cy * LIGHT[1]) / radius.max(1.0);
+                    return scale(iron, (1.1 + 0.3 * lit) as f32);
+                }
+            }
+            // A fan: four curved blades in a ring.
+            2 if radius < 27.0 => {
+                if radius > 24.0 || radius < 4.0 {
+                    return iron;
+                }
+                let blade = (cy.atan2(cx) * 2.0 + radius * 0.08).sin();
+                if blade > 0.35 {
+                    return scale(iron, 1.2);
+                }
+                return glow;
+            }
+            _ => {}
+        }
+        // Bars every 10 pixels each way, lit along their upper-left edges;
+        // the last variant has some missing near the middle.
+        let (bx, by) = (x.rem_euclid(10.0), y.rem_euclid(10.0));
+        let missing = variant == 3 && radius < 20.0 && unit(theme.seed, (x / 10.0) as i64, 1) < 0.5;
+        if !missing && (bx < 3.0 || by < 3.0) {
+            let lit = if bx < 1.0 || by < 1.0 { 1.35 } else { 1.0 };
+            return scale(iron, lit);
+        }
+        glow
+    }
+
+    /// Frosted glass: pale panes with ferns of frost spreading over them, a
+    /// snowflake, a clear patch or a crack in the variants.
+    #[allow(clippy::cast_possible_truncation)]
+    fn frost(&self, x: f64, y: f64, variant: u16) -> Rgb {
+        let theme = self.theme;
+        let (cx, cy) = (x - CENTRE, y - CENTRE);
+        let radius = cx.hypot(cy);
+        let fern = Self::periodic(&self.wear, x, y, 7.0).abs();
+        let frosted = 1.0 - (fern / 0.12).min(1.0);
+        let mut colour = lerp(theme.glass[0], theme.glass[1], 0.35 + 0.6 * frosted);
+        match variant {
+            // A six-armed snowflake with side branches.
+            1 if radius < 24.0 => {
+                let angle = cy.atan2(cx).rem_euclid(TAU / 6.0);
+                let arm = radius * angle.min(TAU / 6.0 - angle).sin();
+                let branch = ((radius - 12.0).abs() < 6.0)
+                    && (arm - (radius - 12.0).abs() * 0.6).abs() < 1.2;
+                if arm < 1.3 || branch || radius < 3.0 {
+                    colour = scale(theme.glass[1], 1.25);
+                }
+            }
+            // A clear patch, rubbed free of frost.
+            2 if radius < 18.0 => {
+                colour = lerp(
+                    scale(theme.glass[0], 0.8),
+                    colour,
+                    (radius / 18.0).powi(3) as f32,
+                );
+            }
+            // A crack across the pane.
+            3 => {
+                let wobble = f64::from(Self::periodic(&self.grain, x, y, 5.0)) * 4.0;
+                if (cy + cx * 0.4 + wobble).abs() < 0.9 && cx.abs() < 26.0 {
+                    colour = scale(theme.mortar, 1.2);
+                }
+            }
+            _ => {}
+        }
+        colour
     }
 
     /// Leaded glass: staggered panes, with a motif in each variant kept
