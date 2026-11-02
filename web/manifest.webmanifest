@@ -1,0 +1,10 @@
+{
+  "name": "Prismapsis",
+  "short_name": "Prismapsis",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0d0d1a",
+  "theme_color": "#0d0d1a"
+}

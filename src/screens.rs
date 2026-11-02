@@ -113,6 +113,18 @@ pub struct Menu {
     shown_at: f64,
 }
 
+impl Menu {
+    /// A menu of `choices`, the first selected, shown at `now` in real seconds.
+    #[must_use]
+    pub const fn new(choices: Vec<Choice>, now: f64) -> Self {
+        Self {
+            choices,
+            selected: 0,
+            shown_at: now,
+        }
+    }
+}
+
 /// One of a menu's lines, by its index among the choices.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MenuLine(pub usize);
@@ -243,11 +255,7 @@ fn spawn_screen(
                 root.spawn(text(line.clone(), 3.5, Color::WHITE));
             }
             root.spawn((
-                Menu {
-                    choices,
-                    selected: 0,
-                    shown_at: now,
-                },
+                Menu::new(choices, now),
                 Node {
                     flex_direction: FlexDirection::Column,
                     align_items: AlignItems::Center,
@@ -295,7 +303,7 @@ fn spawn_settings(mut commands: Commands, time: Res<Time<Real>>) {
             Choice::Volume(Channel::Effects),
             Choice::Back,
         ],
-        "Left and right change a volume",
+        "Left and right change a volume, as do taps on either side",
         time.elapsed_secs_f64(),
     );
 }
