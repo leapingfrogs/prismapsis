@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use bevy::color::{Color, ColorToComponents};
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
-use prismapsis::art::{features, glow, hud, phantoms};
+use prismapsis::art::{backdrops, features, glow, hud, phantoms};
 use prismapsis::enemy::EnemyKind;
 use prismapsis::light::Primary;
 use prismapsis::powerup::PowerUp;
@@ -79,7 +79,13 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
     let features = paint::themes()
         .into_iter()
         .map(|theme| (features::tileset_path(&theme), features::tileset(&theme)));
-    let images = tilesets.chain(features).chain([
+    let backdrops = paint::themes().into_iter().map(|theme| {
+        (
+            backdrops::backdrop_path(&theme),
+            backdrops::backdrop(&theme),
+        )
+    });
+    let images = tilesets.chain(features).chain(backdrops).chain([
         (sprites::SHEET_PATH.to_owned(), sprites::sheet()),
         (phantoms::TILESET_PATH.to_owned(), phantoms::tileset()),
         (glow::BEAM_PATH.to_owned(), glow::beam()),
