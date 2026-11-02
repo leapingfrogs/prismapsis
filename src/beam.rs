@@ -124,6 +124,10 @@ pub enum BeamColour {
     Blue,
 }
 
+impl BeamColour {
+    pub const ALL: [Self; 4] = [Self::White, Self::Red, Self::Green, Self::Blue];
+}
+
 /// Times a beam can reflect off mirrors before it stops.
 pub const MAX_REFLECTIONS: usize = 4;
 

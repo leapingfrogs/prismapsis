@@ -1,4 +1,5 @@
-//! Draws figures from the sprite sheet, and plays their animations.
+//! Draws figures from the sprite sheet, and plays their animations; also
+//! loads the beam's and the exit's art.
 
 use super::sprites::{CELL_SIZE, Figure};
 use bevy::asset::RenderAssetUsages;
@@ -8,12 +9,17 @@ use bevy::prelude::*;
 /// The sheet painted by `just art`.
 const SHEET: &[u8] = include_bytes!("../../assets/art/sprites.png");
 
+/// The beam's and exit's art, painted by `just art`.
+const BEAM: &[u8] = include_bytes!("../../assets/art/beam.png");
+const EXIT_FRAME: &[u8] = include_bytes!("../../assets/art/exit_frame.png");
+const EXIT_LIGHT: &[u8] = include_bytes!("../../assets/art/exit_light.png");
+
 #[derive(Debug, Default)]
 pub struct FiguresPlugin;
 
 impl Plugin for FiguresPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, load_sheet)
+        app.add_systems(PreStartup, (load_sheet, load_glow))
             .add_systems(Update, animate);
     }
 }
@@ -65,6 +71,31 @@ fn load_sheet(mut commands: Commands, images: Option<ResMut<Assets<Image>>>) {
         }
     };
     commands.insert_resource(Sheet(handle));
+}
+
+/// The beam's glow and the exit's frame and light.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct GlowArt {
+    pub beam: Handle<Image>,
+    pub exit_frame: Handle<Image>,
+    pub exit_light: Handle<Image>,
+}
+
+/// Without images (headless tests), the handles are left empty.
+fn load_glow(mut commands: Commands, mut images: Option<ResMut<Assets<Image>>>) {
+    let mut load = |name: &str, png: &[u8]| match (images.as_mut(), sheet_image(png)) {
+        (Some(images), Ok(image)) => images.add(image),
+        (None, _) => Handle::default(),
+        (_, Err(problem)) => {
+            error!("{name}: {problem}");
+            Handle::default()
+        }
+    };
+    commands.insert_resource(GlowArt {
+        beam: load("beam", BEAM),
+        exit_frame: load("exit frame", EXIT_FRAME),
+        exit_light: load("exit light", EXIT_LIGHT),
+    });
 }
 
 /// Plays a figure's frames over and over.

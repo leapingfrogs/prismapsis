@@ -1,7 +1,8 @@
 //! Generated art tools.
 //!
-//! - `art` paints every theme's tilesets (walls, panels and features) and
-//!   the sprite sheet into `assets/art`.
+//! - `art` paints every theme's tilesets (walls, panels and features), the
+//!   sprite sheet, the phantom tileset and the beam and exit art into
+//!   `assets/art`.
 //! - `art --check` changes nothing and fails if a committed image is out of
 //!   date.
 //! - `art preview DIR` writes a sample of each theme to DIR, drawn
@@ -12,9 +13,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use bevy::color::{Color, ColorToComponents};
-use prismapsis::art::features;
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
+use prismapsis::art::{features, glow, phantoms};
 use prismapsis::enemy::EnemyKind;
 use prismapsis::light::Primary;
 use prismapsis::powerup::PowerUp;
@@ -78,10 +79,13 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
     let features = paint::themes()
         .into_iter()
         .map(|theme| (features::tileset_path(&theme), features::tileset(&theme)));
-    let images = tilesets.chain(features).chain(std::iter::once((
-        sprites::SHEET_PATH.to_owned(),
-        sprites::sheet(),
-    )));
+    let images = tilesets.chain(features).chain([
+        (sprites::SHEET_PATH.to_owned(), sprites::sheet()),
+        (phantoms::TILESET_PATH.to_owned(), phantoms::tileset()),
+        (glow::BEAM_PATH.to_owned(), glow::beam()),
+        (glow::EXIT_FRAME_PATH.to_owned(), glow::exit_frame()),
+        (glow::EXIT_LIGHT_PATH.to_owned(), glow::exit_light()),
+    ]);
     for (relative, canvas) in images {
         let path = assets.join(&relative);
         let bytes = png(&canvas)?;
