@@ -100,10 +100,16 @@ fn spawn_score_text(mut commands: Commands) {
         ScoreText,
         Text::new("0"),
         TextFont {
-            font_size: FontSize::Vh(3.0),
+            font_size: FontSize::Vh(3.4),
+            weight: FontWeight::SEMIBOLD,
             ..default()
         },
         TextColor(Color::WHITE),
+        // A soft shadow keeps it readable over bright light.
+        TextShadow {
+            offset: Vec2::splat(2.0),
+            color: Color::srgba(0.0, 0.0, 0.05, 0.7),
+        },
         Node {
             position_type: PositionType::Absolute,
             right: Val::Vw(1.5),

@@ -207,6 +207,9 @@ fn watch_play(mut events: MessageReader<GameEvent>, mut next: ResMut<NextState<S
     }
 }
 
+/// Text this size or larger is a heading.
+const HEADING_SIZE: f32 = 8.0;
+
 /// Centred text, `size` a percentage of the window's smaller side.
 fn text(content: impl Into<String>, size: f32, colour: Color) -> impl Bundle {
     (
@@ -214,6 +217,12 @@ fn text(content: impl Into<String>, size: f32, colour: Color) -> impl Bundle {
         TextLayout::justify(Justify::Center),
         TextFont {
             font_size: FontSize::VMin(size),
+            // Headings stand out in a heavier weight.
+            weight: if size >= HEADING_SIZE {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::NORMAL
+            },
             ..default()
         },
         TextColor(colour),

@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use crate::art::figures::GlowArt;
 use crate::art::glow;
 use crate::art::tiles::PhantomTiles;
+use crate::hud::{self, HudArt};
 use crate::level::{CurrentLevel, Solid};
 use crate::light::{ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Spectrum};
 use crate::screens::{Screen, in_play};
@@ -213,40 +214,29 @@ fn animate_exit(
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GaugeFill(pub Primary);
 
-fn spawn_gauges(mut commands: Commands) {
+/// A glass tube for each primary under the energy bar, filling with that
+/// colour's light.
+fn spawn_gauges(mut commands: Commands, art: Res<HudArt>) {
     commands
         .spawn((
             Name::new("Spectrum gauges"),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Vw(1.5),
-                top: Val::Vh(10.0),
+                top: Val::Vh(crate::render::HUD_GAUGES_TOP),
                 column_gap: Val::Vw(0.5),
                 ..default()
             },
         ))
         .with_children(|row| {
             for primary in Primary::ALL {
-                row.spawn((
-                    Node {
-                        width: Val::Vw(5.0),
-                        height: Val::Vh(1.2),
-                        padding: UiRect::all(Val::Vh(0.2)),
-                        ..default()
-                    },
-                    BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-                ))
-                .with_children(|gauge| {
-                    gauge.spawn((
-                        GaugeFill(primary),
-                        Node {
-                            width: Val::Percent(0.0),
-                            height: Val::Percent(100.0),
-                            ..default()
-                        },
-                        BackgroundColor(hue_colour(primary.into())),
-                    ));
-                });
+                row.spawn(hud::tube(
+                    &art,
+                    Val::Vw(5.0),
+                    2.2,
+                    hue_colour(primary.into()),
+                    GaugeFill(primary),
+                ));
             }
         });
 }
@@ -255,16 +245,16 @@ fn spawn_gauges(mut commands: Commands) {
 fn update_gauges(
     spectrum: Res<Spectrum>,
     tuning: Res<LightTuning>,
-    mut fills: Query<(&GaugeFill, &mut Node, &mut BackgroundColor)>,
+    mut fills: Query<(&GaugeFill, &mut Node, &mut ImageNode)>,
 ) {
     if !spectrum.is_changed() && !tuning.is_changed() {
         return;
     }
-    for (fill, mut node, mut background) in &mut fills {
+    for (fill, mut node, mut image) in &mut fills {
         let primary = fill.0;
         node.width = Val::Percent(spectrum.fill(primary, tuning.gauge_capacity) * 100.0);
         let colour = hue_colour(primary.into());
-        background.0 = if spectrum.restored[primary.index()] {
+        image.color = if spectrum.restored[primary.index()] {
             colour
         } else {
             colour.with_alpha(0.55)

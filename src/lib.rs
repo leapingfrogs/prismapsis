@@ -15,6 +15,7 @@ pub mod dev_tools;
 pub mod enemy;
 pub mod events;
 pub mod hero;
+pub mod hud;
 pub mod level;
 pub mod light;
 pub mod music;
