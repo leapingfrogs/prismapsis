@@ -1,4 +1,4 @@
-//! A tiny synthesiser for Prismapsis's sound effects.
+//! A tiny synthesiser for Prismapsis's sound effects and music.
 //!
 //! Each sound is a list of tones (an oscillator with a pitch slide, an
 //! envelope and optional vibrato), mixed, optionally low-passed and echoed,
@@ -6,6 +6,8 @@
 //! the game plays is in one key; see `docs/design.md`.
 
 use std::f32::consts::TAU;
+
+pub mod music;
 
 pub const SAMPLE_RATE: u32 = 44_100;
 
@@ -286,6 +288,47 @@ fn lowpass(samples: &mut [f32], cutoff: f32, looping: bool) {
 /// Render `sound` to samples in -1..1.
 #[must_use]
 pub fn render(sound: &Sound) -> Vec<f32> {
+    let mut samples = mix(sound);
+    normalise(&mut samples, sound.peak);
+    samples
+}
+
+/// Render `sound` as a loop `length` seconds long whose notes ring on past
+/// its end into its start, as they would when it repeats. `sound` should
+/// not itself be `looping`.
+#[must_use]
+pub fn render_wrapped(sound: &Sound, length: f32) -> Vec<f32> {
+    let mut out = vec![0.0; seconds_to_samples(length)];
+    let len = out.len();
+    for (i, sample) in mix(sound).into_iter().enumerate() {
+        out[i % len] += sample;
+    }
+    normalise(&mut out, sound.peak);
+    out
+}
+
+/// Half the sample rate, averaging each pair of samples.
+#[must_use]
+pub fn halve_rate(samples: &[f32]) -> Vec<f32> {
+    samples
+        .chunks(2)
+        .map(|pair| pair.iter().sum::<f32>() / 2.0)
+        .collect()
+}
+
+/// Scale `samples` so the loudest is at `peak`.
+fn normalise(samples: &mut [f32], peak: f32) {
+    let loudest = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    if loudest > 0.0 {
+        let scale = peak / loudest;
+        for sample in samples {
+            *sample *= scale;
+        }
+    }
+}
+
+/// Every tone of `sound` mixed, filtered and echoed, before normalising.
+fn mix(sound: &Sound) -> Vec<f32> {
     let looping = sound.looping.is_some();
     let tail = match (sound.echo, looping) {
         // Enough repeats to fade below 1%.
@@ -309,19 +352,18 @@ pub fn render(sound: &Sound) -> Vec<f32> {
             samples[i] += samples[i - delay] * echo.feedback;
         }
     }
-    let loudest = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    if loudest > 0.0 {
-        let scale = sound.peak / loudest;
-        for sample in &mut samples {
-            *sample *= scale;
-        }
-    }
     samples
 }
 
 /// Encode samples as a 16-bit mono PCM WAV file.
 #[must_use]
 pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
+    wav_bytes_at(samples, SAMPLE_RATE)
+}
+
+/// Encode samples at `rate` as a 16-bit mono PCM WAV file.
+#[must_use]
+pub fn wav_bytes_at(samples: &[f32], rate: u32) -> Vec<u8> {
     let data_len = u32::try_from(samples.len() * 2).unwrap_or(u32::MAX);
     let mut out = Vec::with_capacity(44 + samples.len() * 2);
     out.extend_from_slice(b"RIFF");
@@ -330,8 +372,8 @@ pub fn wav_bytes(samples: &[f32]) -> Vec<u8> {
     out.extend_from_slice(&16u32.to_le_bytes());
     out.extend_from_slice(&1u16.to_le_bytes()); // PCM
     out.extend_from_slice(&1u16.to_le_bytes()); // mono
-    out.extend_from_slice(&SAMPLE_RATE.to_le_bytes());
-    out.extend_from_slice(&(SAMPLE_RATE * 2).to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 2).to_le_bytes());
     out.extend_from_slice(&2u16.to_le_bytes());
     out.extend_from_slice(&16u16.to_le_bytes());
     out.extend_from_slice(b"data");

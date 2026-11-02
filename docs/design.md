@@ -388,7 +388,7 @@ output is committed; the game only ever loads level files.
 ## Screens and score
 
 - **The title** shows over the campaign's first level, greyed and still,
-  with Play and Quit. Playing starts a new game from the first level with
+  with Play, Settings and Quit. Playing starts a new game from the first level with
   no abilities and no points. A level given with `--level` goes straight
   into play.
 - **Game over** comes when the last life is lost. It shows the score and
@@ -396,6 +396,11 @@ output is committed; the game only ever loads level files.
   score back at nothing, or going back to the title.
 - **Finishing the campaign** shows the score and the best, then goes back
   to the title.
+- **Settings**, from the title, set the master, music and effects volumes
+  in steps of 10% with left and right. Changing the master or effects
+  volume plays a chime to hear it by; the music plays throughout. They're
+  saved on going back, to `prismapsis/settings.toml` in the user's
+  configuration directory, and loaded at start.
 - **Menus** stop the game clock as pausing does, so the level waits behind
   them, and P does nothing. Up and down move through a menu; enter, space
   or the gamepad's south or start button chooses. A menu ignores presses
@@ -524,11 +529,22 @@ output is committed; the game only ever loads level files.
   - Power-ups: pickup appears, collected (rising chime, a distinct note per
     power-up), about to expire, abilities lost.
   - Prism/UI: freeze and unfreeze, energy empty, energy fully recharged.
-- **Controls:** master, effects and beam volume sliders in the dev panel,
-  with buttons to audition each sound. Player-facing settings come with the
-  game loop.
-- **Music: not yet.** It comes later and will share the Lydian key, so the
-  effects sit over it.
+- **Controls:** the player sets master, music and effects volumes in the
+  settings (see "Screens and score"). The dev panel also has them, the
+  beam's level within the effects, and buttons to audition each sound.
+- **Music in four stems** that loop together: one 8-bar piece at 100 beats a
+  minute in Lydian on C, so the effects sit over it, moving through C major
+  7, D over C, E minor 7 and D over C. `tools/sfx` writes them at half the
+  effects' sample rate to keep them small, with notes that ring past the
+  end folded back into the start so the loop is seamless.
+  - **Base (grey):** a soft pad and a low root. It always plays in a level.
+  - **Red:** a plucked arpeggio in eighth notes, the rhythm.
+  - **Green:** the melody, a warm lead with a little vibrato.
+  - **Blue:** high bells on the chords' upper notes, echoing.
+  - Each colour's stem swells in over a couple of seconds once that
+    colour is restored, so the music fills out as the level does. The
+    title, settings and the campaign's end play every stem; game over plays
+    only the base. Menus don't stop the music; pausing lowers it.
 
 ## 3D
 
@@ -565,5 +581,5 @@ output is committed; the game only ever loads level files.
 | 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
 | 8-1 | Screens and score | Title, game over and campaign-finished screens with menus that stop the clock; continuing after a game over; points from game events, shown in play; the best score this session. |
-| 8-2 | Music and audio | Music, and audio settings in the menus. |
+| 8-2 | Music and audio | Four-stem music in Lydian that fills out as colours are restored; a settings screen for master, music and effects volumes, saved between runs. |
 | 9+ | 3D | To be designed. |

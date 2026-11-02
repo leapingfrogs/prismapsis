@@ -46,7 +46,7 @@ level-show *files:
 art *args:
     cargo run --locked --bin art -- {{args}}
 
-# Regenerate the sound effects in assets/audio from tools/sfx
+# Regenerate the sound effects and music in assets/audio from tools/sfx
 sfx:
     cargo run --locked -p sfx
 

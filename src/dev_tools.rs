@@ -317,6 +317,7 @@ fn sound_section(ui: &mut egui::Ui, panel: &mut SoundPanel) {
         choice,
     } = panel;
     ui.add(egui::Slider::new(&mut settings.master, 0.0..=1.0).text("master volume"));
+    ui.add(egui::Slider::new(&mut settings.music, 0.0..=1.0).text("music volume"));
     ui.add(egui::Slider::new(&mut settings.effects, 0.0..=1.0).text("effects volume"));
     ui.add(egui::Slider::new(&mut settings.beam, 0.0..=1.0).text("beam volume"));
     ui.horizontal(|ui| {

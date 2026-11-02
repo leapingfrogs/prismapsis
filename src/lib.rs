@@ -17,6 +17,7 @@ pub mod events;
 pub mod hero;
 pub mod level;
 pub mod light;
+pub mod music;
 pub mod pause;
 pub mod physics;
 pub mod powerup;
@@ -24,6 +25,7 @@ pub mod prism;
 pub mod render;
 pub mod score;
 pub mod screens;
+pub mod settings;
 pub mod sound;
 pub mod spectrum_view;
 
@@ -46,6 +48,8 @@ pub struct GamePlugin {
     /// A level to play over and over instead of the built-in campaign, with
     /// the file it came from (watched for edits in dev builds).
     pub level: Option<(level::Level, std::path::PathBuf)>,
+    /// Where the player's settings are kept, if anywhere.
+    pub settings: Option<std::path::PathBuf>,
 }
 
 impl Plugin for GamePlugin {
@@ -66,8 +70,12 @@ impl Plugin for GamePlugin {
                 SimulationPlugin,
                 render::PresentationPlugin,
                 sound::SoundPlugin,
+                music::MusicPlugin,
                 score::ScorePlugin,
                 screens::ScreensPlugin { start },
+                settings::SettingsPlugin {
+                    path: self.settings.clone(),
+                },
             ));
         #[cfg(feature = "dev")]
         app.add_plugins((dev_tools::DevToolsPlugin, level::reload::LevelReloadPlugin));
