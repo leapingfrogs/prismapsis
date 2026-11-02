@@ -609,6 +609,14 @@ output is committed; the game only ever loads level files.
   top left, with faint seams between cells and a gleam on the corner.
 - **Beams** are a soft glow stretched along each piece, from a painted
   profile, with a whitened core down the middle.
+- **The title and menus** share the HUD's glass: the title shows a
+  generated emblem, white light split by a prism into red, green and
+  blue, over the name in letters that shimmer through the spectrum. Menus
+  sit on a glass panel sliced to fit, the selected line on a soft band of
+  light. The pause overlay and the level-complete banner use the same
+  panel, the banner's "Spectrum restored!" in spectrum letters, and the
+  pause hint names the touch button while the touch controls show. The
+  touch buttons are faint until pressed, so they hide little of the play.
 - **The HUD** shares one look: lives are small heroes from the sprite sheet;
   the energy bar and the spectrum gauges are glass tubes, painted by the
   `art` tool and sliced to any length, that fill with light in their

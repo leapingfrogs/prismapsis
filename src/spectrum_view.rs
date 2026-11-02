@@ -274,25 +274,43 @@ const BANNER_TIME: f32 = 3.0;
 #[derive(Component, Debug, Default)]
 pub struct Banner(pub f32);
 
-fn spawn_banner(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Level complete banner"),
-        Banner::default(),
-        Text::new("Spectrum restored!"),
-        TextLayout::justify(Justify::Center),
-        TextFont {
-            font_size: FontSize::Vh(6.0),
-            ..default()
-        },
-        TextColor(Color::WHITE),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Vh(40.0),
-            justify_self: JustifySelf::Center,
-            ..default()
-        },
-        Visibility::Hidden,
-    ));
+/// The name of the level the banner leads into.
+#[derive(Component, Debug)]
+pub struct BannerLevel;
+
+/// "Spectrum restored!" in shimmering spectrum letters on a glass panel,
+/// with the next level's name below.
+fn spawn_banner(mut commands: Commands, art: Option<Res<HudArt>>) {
+    let art = art.as_deref().cloned().unwrap_or_default();
+    commands
+        .spawn((
+            Name::new("Level complete banner"),
+            Banner::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                top: Val::Vh(34.0),
+                justify_self: JustifySelf::Center,
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::Center,
+                row_gap: Val::VMin(1.0),
+                padding: UiRect::axes(Val::VMin(7.0), Val::VMin(3.0)),
+                ..default()
+            },
+            Visibility::Hidden,
+        ))
+        .with_children(|banner| {
+            banner.spawn(hud::panel(&art));
+            hud::spectrum_text(banner, "Spectrum restored!", 7.0);
+            banner.spawn((
+                BannerLevel,
+                Text::default(),
+                TextFont {
+                    font_size: FontSize::VMin(3.5),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.85, 0.87, 0.93)),
+            ));
+        });
 }
 
 /// Show the banner when a level is completed, naming the next level. A
@@ -302,17 +320,20 @@ fn show_banner(
     completed: Res<LevelsCompleted>,
     level: Option<Res<CurrentLevel>>,
     screen: Option<Res<State<Screen>>>,
-    mut banners: Query<(&mut Banner, &mut Visibility, &mut Text)>,
+    mut banners: Query<(&mut Banner, &mut Visibility)>,
+    mut names: Query<&mut Text, With<BannerLevel>>,
 ) {
     let playing = in_play(screen);
-    for (mut banner, mut visibility, mut text) in &mut banners {
+    for (mut banner, mut visibility) in &mut banners {
         if !playing {
             banner.0 = 0.0;
         }
         if completed.is_changed() && completed.0 > 0 {
             banner.0 = BANNER_TIME;
             let next = level.as_ref().map_or("", |l| l.0.name.as_str());
-            text.0 = format!("Spectrum restored!\n{next}");
+            for mut name in &mut names {
+                next.clone_into(&mut name.0);
+            }
         }
         banner.0 = (banner.0 - time.delta_secs()).max(0.0);
         visibility.set_if_neq(if banner.0 > 0.0 {

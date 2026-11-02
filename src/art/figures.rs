@@ -19,7 +19,15 @@ pub struct FiguresPlugin;
 
 impl Plugin for FiguresPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreStartup, (load_sheet, load_glow))
+        // Loaded now, so screens spawned when the first state is entered
+        // have their art.
+        let glow = load_glow(
+            app.world_mut()
+                .get_resource_mut::<Assets<Image>>()
+                .as_deref_mut(),
+        );
+        app.insert_resource(glow)
+            .add_systems(PreStartup, load_sheet)
             .add_systems(Update, animate);
     }
 }
@@ -82,7 +90,7 @@ pub struct GlowArt {
 }
 
 /// Without images (headless tests), the handles are left empty.
-fn load_glow(mut commands: Commands, mut images: Option<ResMut<Assets<Image>>>) {
+fn load_glow(mut images: Option<&mut Assets<Image>>) -> GlowArt {
     let mut load = |name: &str, png: &[u8]| match (images.as_mut(), sheet_image(png)) {
         (Some(images), Ok(image)) => images.add(image),
         (None, _) => Handle::default(),
@@ -91,11 +99,11 @@ fn load_glow(mut commands: Commands, mut images: Option<ResMut<Assets<Image>>>) 
             Handle::default()
         }
     };
-    commands.insert_resource(GlowArt {
+    GlowArt {
         beam: load("beam", BEAM),
         exit_frame: load("exit frame", EXIT_FRAME),
         exit_light: load("exit light", EXIT_LIGHT),
-    });
+    }
 }
 
 /// Plays a figure's frames over and over.

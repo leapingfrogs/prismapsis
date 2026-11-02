@@ -15,7 +15,7 @@ use std::process::ExitCode;
 use bevy::color::{Color, ColorToComponents};
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
-use prismapsis::art::{backdrops, features, glow, hud, phantoms, touch};
+use prismapsis::art::{backdrops, features, glow, hud, menu, phantoms, touch};
 use prismapsis::enemy::EnemyKind;
 use prismapsis::light::Primary;
 use prismapsis::powerup::PowerUp;
@@ -93,6 +93,8 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
         (glow::EXIT_LIGHT_PATH.to_owned(), glow::exit_light()),
         (hud::TUBE_PATH.to_owned(), hud::tube()),
         (hud::FILL_PATH.to_owned(), hud::fill()),
+        (menu::EMBLEM_PATH.to_owned(), menu::emblem()),
+        (menu::PANEL_PATH.to_owned(), menu::panel()),
         (touch::GLYPHS_PATH.to_owned(), touch::glyphs()),
     ]);
     for (relative, canvas) in images {
