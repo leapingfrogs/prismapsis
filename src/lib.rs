@@ -28,6 +28,7 @@ pub mod screens;
 pub mod settings;
 pub mod sound;
 pub mod spectrum_view;
+pub mod touch;
 
 /// Title shown on the game window.
 pub const WINDOW_TITLE: &str = "Prismapsis";
@@ -76,6 +77,7 @@ impl Plugin for GamePlugin {
                 settings::SettingsPlugin {
                     path: self.settings.clone(),
                 },
+                touch::TouchPlugin,
             ));
         #[cfg(feature = "dev")]
         app.add_plugins((dev_tools::DevToolsPlugin, level::reload::LevelReloadPlugin));

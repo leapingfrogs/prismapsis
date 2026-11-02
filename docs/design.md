@@ -427,12 +427,33 @@ output is committed; the game only ever loads level files.
 - **The page** (`web/index.html`) gives the game a `#game` canvas filling
   the window; keys like space don't scroll it. Browsers keep audio
   suspended until the player interacts, so the page resumes it on the first
-  key, click or touch. It already stops scrolling, zooming and the
-  long-press menu, ready for touch controls (8c).
+  key, click or touch. It stops scrolling, zooming and the long-press
+  menu, keeps the canvas clear of the notch and home bar, asks phones held
+  upright to turn sideways, and has a web manifest, so a game added to the
+  home screen plays without the browser's bars (iPhone has no Fullscreen
+  API).
 - **In a browser** the title has no Quit, the clock comes from `web-time`,
   and settings aren't saved yet, as there's no configuration directory;
   the browser's local storage could keep them later.
 - `just web` builds it into `dist/web`; `just web-serve` serves it locally.
+
+## Touch controls
+
+- **One input layer:** a touch on an on-screen button presses that
+  button's key, so play reads keys, gamepad and touch the same way and
+  nothing else in the game knows about touch (`src/touch.rs`).
+- **Buttons,** drawn with Bevy UI over the level in play: spin left and
+  right at the bottom left, with hover up and down above them only while
+  the hero has anti-gravity; fire and hold the prism at the bottom right;
+  pause at the top right under the score. A finger that starts on hold
+  keeps the prism held wherever it slides, and sliding it up turns the
+  prism anticlockwise and down clockwise, as Q and E do. Each button holds its key while
+  any finger is on it, so one thumb can hold fire while the other taps
+  spin, and a finger sliding onto a button presses it.
+- **Shown** after the first touch, and hidden again by a key or gamepad
+  press.
+- **Menus** are tapped: a tap selects the nearest line and chooses it; on
+  a volume, the left half turns it down and the right half up.
 
 ## Resolution and art
 
