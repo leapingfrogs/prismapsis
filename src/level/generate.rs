@@ -11,6 +11,9 @@
 //! skip. Lenses of a gate's colour sit before it, a checkpoint follows it,
 //! and a pickup hidden until the gate's colour returns sits nearby.
 //!
+//! A recipe can ask for tile features too: one-way platforms, springs, mud
+//! and mirrors, placed where they can't open a way past a gate.
+//!
 //! Every level is checked before it's written: it must be finishable with
 //! every checkpoint in reach, and taking away any gate's phantoms must make
 //! it unfinishable, so no gate can be bypassed. A layout that fails is
@@ -48,6 +51,40 @@ const PICKUPS: [PowerUp; 4] = [
 /// Legend characters for pickups, assigned in order of use.
 const PICKUP_CHARS: &str = "456789";
 
+/// A tile feature a generated level may use, beyond plain walls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Feature {
+    /// One-way platforms, `=`.
+    Platforms,
+    /// Spring pads, `^`.
+    Springs,
+    /// Mud, `~`, in wide levels only.
+    Mud,
+    /// Mirror walls, `%`.
+    Mirrors,
+}
+
+impl Feature {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Platforms => "platforms",
+            Self::Springs => "springs",
+            Self::Mud => "mud",
+            Self::Mirrors => "mirrors",
+        }
+    }
+
+    const fn char(self) -> char {
+        match self {
+            Self::Platforms => '=',
+            Self::Springs => '^',
+            Self::Mud => '~',
+            Self::Mirrors => '%',
+        }
+    }
+}
+
 /// A generated level's overall shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -70,6 +107,9 @@ pub struct Recipe {
     /// Lenses before each gate.
     #[serde(default = "one")]
     pub lenses: usize,
+    /// The tile features to place.
+    #[serde(default)]
+    pub features: Vec<Feature>,
     /// Seconds between mote waves, if not the default.
     pub wave_interval: Option<f32>,
     /// The layout attempt that made the file, which the generator records.
@@ -136,6 +176,7 @@ enum Stage {
     Lenses,
     Pickups,
     Decoration,
+    Features,
 }
 
 impl Rng {
@@ -178,6 +219,7 @@ struct Streams {
     lenses: Rng,
     pickups: Rng,
     decoration: Rng,
+    features: Rng,
 }
 
 impl Streams {
@@ -189,6 +231,7 @@ impl Streams {
             lenses: Rng::new(seed, attempt, Stage::Lenses),
             pickups: Rng::new(seed, attempt, Stage::Pickups),
             decoration: Rng::new(seed, attempt, Stage::Decoration),
+            features: Rng::new(seed, attempt, Stage::Features),
         }
     }
 }
@@ -254,6 +297,17 @@ impl Draft {
         (col.saturating_sub(1)..=(col + 1).min(self.cols - 1)).all(|c| {
             (height.saturating_sub(1)..=(height + 1).min(self.top())).all(|h| self.get(c, h) == ' ')
         })
+    }
+
+    /// Make the top cell of the ground under `height` into `ch`; at height 0
+    /// that's the bottom border.
+    fn surface(&mut self, col: usize, height: usize, ch: char) {
+        let row = self.row(height) + 1;
+        self.map[row][col] = ch;
+    }
+
+    fn surface_at(&self, col: usize, height: usize) -> char {
+        self.map[self.row(height) + 1][col]
     }
 
     fn lens(&mut self, col: usize, height: usize, colour: Primary) {
@@ -341,6 +395,14 @@ impl Draft {
             .collect();
         let _ = writeln!(out, "gates = [{}]", gates.join(", "));
         let _ = writeln!(out, "lenses = {}", recipe.lenses);
+        if !recipe.features.is_empty() {
+            let features: Vec<String> = recipe
+                .features
+                .iter()
+                .map(|feature| format!("\"{}\"", feature.name()))
+                .collect();
+            let _ = writeln!(out, "features = [{}]", features.join(", "));
+        }
         if let Some(interval) = recipe.wave_interval {
             let _ = writeln!(out, "wave-interval = {interval:?}");
         }
@@ -417,6 +479,87 @@ fn place_lenses(
             draft.lens(col, height, primaries[placed % primaries.len()]);
             placed += 1;
         }
+    }
+}
+
+/// A plain wall ledge or platform as one of the features in use: one-way
+/// half the time, otherwise sometimes a mirror.
+fn ledge_feature(features: &[Feature], rng: &mut Rng) -> char {
+    if features.contains(&Feature::Platforms) && rng.chance(50) {
+        '='
+    } else if features.contains(&Feature::Mirrors) && rng.chance(40) {
+        '%'
+    } else {
+        '#'
+    }
+}
+
+/// Columns of a wide level's segment that patterned ground covers, from
+/// `from` up to `to`, and where springs must stop, well before a gate.
+struct Middle {
+    from: usize,
+    to: usize,
+    springs_to: usize,
+}
+
+/// Features on a wide level's ground: mud in pits and on some flat
+/// stretches, mirror pillars, and a spring pad on a flat stretch of each
+/// segment. Only the patterned middles change, so the start, checkpoints
+/// and gate approaches keep plain ground.
+fn ground_features(
+    draft: &mut Draft,
+    features: &[Feature],
+    ground: &[usize],
+    middles: &[Middle],
+    rng: &mut Rng,
+) {
+    let has = |feature| features.contains(&feature);
+    for middle in middles {
+        // Runs of level ground, each from its first column up to its end.
+        let mut runs = Vec::new();
+        let mut col = middle.from;
+        while col < middle.to {
+            let mut end = col + 1;
+            while end < middle.to && ground[end] == ground[col] {
+                end += 1;
+            }
+            runs.push((col, end));
+            col = end;
+        }
+        for &(col, end) in &runs {
+            let (height, before, after) = (ground[col], ground[col - 1], ground[end]);
+            let pit = before > height && after > height;
+            let pillar = end - col == 2 && before < height && after < height;
+            if has(Feature::Mud) && pit && rng.chance(60) {
+                for c in col..end {
+                    draft.surface(c, height, '~');
+                }
+            } else if has(Feature::Mud) && !pit && end - col >= 4 && rng.chance(20) {
+                draft.surface(col + 1, height, '~');
+                draft.surface(col + 2, height, '~');
+            } else if has(Feature::Mirrors) && pillar && rng.chance(50) {
+                draft.fill(col..=end - 1, before.max(after), height - 1, '%');
+            }
+        }
+        if !has(Feature::Springs) || !rng.chance(70) {
+            continue;
+        }
+        let flats: Vec<(usize, usize)> = runs
+            .into_iter()
+            .filter(|&(col, end)| {
+                end - col >= 3
+                    && end <= middle.springs_to
+                    && ground[col - 1] <= ground[col]
+                    && (col..end).all(|c| draft.surface_at(c, ground[c]) == '#')
+            })
+            .collect();
+        if flats.is_empty() {
+            continue;
+        }
+        let (col, end) = rng.pick(&flats);
+        let left = rng.range(col, end - 2);
+        draft.surface(left, ground[left], '^');
+        draft.surface(left + 1, ground[left], '^');
     }
 }
 
@@ -506,6 +649,7 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
     // exit need it, patterned between.
     let mut ground = vec![0; cols];
     let mut segments = Vec::new();
+    let mut middles = Vec::new();
     let mut start = 1;
     for (i, &length) in lengths.iter().enumerate() {
         let end = start + length;
@@ -521,6 +665,11 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
             *g = height;
         }
         segments.push((start, end));
+        middles.push(Middle {
+            from: start + head,
+            to: end - tail,
+            springs_to: end - if i < gates.len() { 17 } else { 9 },
+        });
         start = end;
     }
     for (col, &height) in ground.iter().enumerate().take(cols - 1).skip(1) {
@@ -553,7 +702,7 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
                 continue;
             }
             let ch = if rng.chance(60) {
-                '#'
+                ledge_feature(&recipe.features, &mut rngs.features)
             } else {
                 letter(rng.pick(&Hue::ALL[..6]))
             };
@@ -584,6 +733,13 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
         }
     }
 
+    ground_features(
+        &mut draft,
+        &recipe.features,
+        &ground,
+        &middles,
+        &mut rngs.features,
+    );
     draft.set(3, ground[3], '@');
     let end = cols - 1;
     draft.fill(end - 3..=end - 2, ground[end - 2], ground[end - 2] + 2, 'X');
@@ -631,7 +787,13 @@ fn tall(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
         let height = 4 + CLIMB * i;
         let ch = match platforms.get(i) {
             Some(Some(gate)) => letter(*gate).to_ascii_lowercase(),
-            _ if rngs.ledges.chance(70) => '#',
+            _ if rngs.ledges.chance(70) => {
+                if i < platforms.len() {
+                    ledge_feature(&recipe.features, &mut rngs.features)
+                } else {
+                    '#'
+                }
+            }
             _ => letter(rngs.ledges.pick(&Hue::ALL[..6])),
         };
         draft.fill(left..=right, height, height, ch);
@@ -662,6 +824,14 @@ fn tall(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
         place_lenses(&mut draft, &mut rngs.lenses, gate, recipe.lenses, spots);
     }
 
+    climb_features(
+        &mut draft,
+        &recipe.features,
+        &platforms,
+        &spans,
+        &mut rngs.features,
+    );
+
     // The exit at the wall end of the top platform.
     let (left, right) = spans[platforms.len()];
     let col = if left == 1 { 2 } else { right - 2 };
@@ -669,6 +839,38 @@ fn tall(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
     let start = if spans[0].0 == 1 { width - 3 } else { 3 };
     draft.set(start, 0, '@');
     draft
+}
+
+/// Features on a tall level beyond its platforms: spring pads at the wall
+/// end of some platforms, never within two of a gate, so a spring can't
+/// skip one, and mirror patches on the side walls.
+fn climb_features(
+    draft: &mut Draft,
+    features: &[Feature],
+    platforms: &[Option<Hue>],
+    spans: &[(usize, usize)],
+    rng: &mut Rng,
+) {
+    let gate = |i: usize| matches!(platforms.get(i), Some(Some(_)));
+    if features.contains(&Feature::Springs) {
+        for (i, &(left, right)) in spans.iter().enumerate().take(platforms.len()) {
+            if gate(i) || gate(i + 1) || gate(i + 2) || !rng.chance(35) {
+                continue;
+            }
+            let col = if left == 1 { 1 } else { right - 1 };
+            draft.fill(col..=col + 1, 4 + CLIMB * i, 4 + CLIMB * i, '^');
+        }
+    }
+    if features.contains(&Feature::Mirrors) {
+        let side = draft.cols - 1;
+        for _ in 0..platforms.len() / 2 {
+            if rng.chance(50) {
+                let col = if rng.chance(50) { 0 } else { side };
+                let low = rng.range(2, draft.top() - 4);
+                draft.fill(col..=col, low, low + 2, '%');
+            }
+        }
+    }
 }
 
 /// Lay out `recipe` as its `attempt` makes it.
@@ -682,10 +884,18 @@ fn build(recipe: &Recipe, gates: &[Hue], attempt: u64) -> Draft {
     draft
 }
 
-/// Whether the draft is a good level: comfortably finishable with every
-/// checkpoint in reach, and with no gate that even the full-strength hero
-/// can bypass.
+/// Whether the draft is a good level: it has each feature the recipe asks
+/// for (tall levels have no mud), it's comfortably finishable with every
+/// checkpoint in reach, and no gate can be bypassed even by the
+/// full-strength hero.
 fn sound(draft: &Draft, name: &str, recipe: &Recipe, gates: &[Hue]) -> bool {
+    let missing = recipe.features.iter().any(|&feature| {
+        (recipe.shape != Shape::Tall || feature != Feature::Mud)
+            && !draft.map.iter().flatten().any(|&ch| ch == feature.char())
+    });
+    if missing {
+        return false;
+    }
     let finishable = |draft: &Draft, limits| {
         parse(&draft.text(name, recipe))
             .ok()
@@ -771,6 +981,7 @@ mod tests {
     use super::*;
     use crate::level::level_files;
     use crate::level::solve::{Unsolvable, solve};
+    use crate::physics::Traits;
     use std::path::Path;
 
     fn recipe(seed: u64, shape: Shape, gates: &[Tint]) -> Recipe {
@@ -779,6 +990,7 @@ mod tests {
             shape,
             gates: gates.to_vec(),
             lenses: 2,
+            features: Vec::new(),
             wave_interval: Some(9.0),
             attempt: None,
         }
@@ -865,6 +1077,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn features_are_placed_when_asked_for() {
+        let all = vec![
+            Feature::Platforms,
+            Feature::Springs,
+            Feature::Mud,
+            Feature::Mirrors,
+        ];
+        for (shape, seed) in [(Shape::Wide, 8), (Shape::Tall, 6)] {
+            let plain = recipe(seed, shape, &[Tint::Red, Tint::Cyan]);
+            let made = Recipe {
+                features: all.clone(),
+                ..plain.clone()
+            };
+            let text = generate("F", &made).unwrap();
+            let level = parse(&text).unwrap();
+            assert_eq!(level.generated.as_ref().unwrap().features, all);
+            assert!(solve_within(&level, Limits::COMFORT).is_ok());
+            let walls =
+                |pick: fn(&Traits) -> bool| level.walls.iter().filter(|(_, _, t)| pick(t)).count();
+            assert!(walls(|t| t.one_way) > 0, "{shape:?} platforms");
+            assert!(walls(|t| t.bounce > 1.0) > 0, "{shape:?} springs");
+            assert!(walls(|t| t.mirror) > 0, "{shape:?} mirrors");
+            // Tall levels have no mud.
+            assert_eq!(walls(|t| t.bounce < 1.0) > 0, shape == Shape::Wide);
+
+            // Without features, none of them.
+            let level = parse(&generate("F", &plain).unwrap()).unwrap();
+            assert!(level.walls.iter().all(|(_, _, t)| *t == Traits::default()));
+        }
+    }
+
+    #[test]
+    fn features_read_from_settings() {
+        let text = "name = \"F\"\n[generated]\nseed = 1\nshape = \"wide\"\n\
+                    features = [\"mud\", \"mirrors\"]\n";
+        let (_, recipe) = read_recipe(text).unwrap();
+        assert_eq!(recipe.features, [Feature::Mud, Feature::Mirrors]);
+        let unknown = text.replace("mud", "lava");
+        assert!(read_recipe(&unknown).is_err());
     }
 
     #[test]
