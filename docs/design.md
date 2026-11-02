@@ -541,7 +541,18 @@ output is committed; the game only ever loads level files.
   - **Pickups** are dark glass bubbles in a lit rim, tinted by the
     power-up, round its white glyph. The **prism** is a glass triangle with
     a bright rim and lines to its corners.
-  - Bursts and checkpoints are still simple shapes.
+  - **Checkpoints** are a crystal lamp in a cradle on a slim post, the
+    post stretched to the checkpoint's height. Reached, the lamp lights
+    past white so it blooms.
+  - **Bursts** are five frames of sparks spraying out, tinted with the
+    light the enemy released.
+  - **Droplets of colour** fly from a defeated enemy to the hero: two for
+    each unit of light its gauge took, so a lens sends four times a
+    mote's. They burst out and up, then swoop in on the hero, stretched
+    along their path, and each arrival ticks a note that climbs the scale.
+    Light that a restored colour doesn't need spills a couple of droplets
+    that fade where they fall. The gauge has already filled; the droplets
+    only show it (`src/droplets.rs`).
 - **Phantom platforms** have a tileset of their own, drawn in white and
   greys one quad per cell like features and tinted with their hue, which
   they keep whatever has been restored. While waiting they are ghosts:

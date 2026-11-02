@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::art::figures::{Animation, Sheet, stagger};
-use crate::art::sprites::Figure;
+use crate::art::sprites::{BURST_FRAMES, BURST_REACH, CELL_SIZE, Figure, POST_REACH, PX_PER_UNIT};
 use crate::beam::{
     BeamColour, BeamEnergy, BeamLoadout, BeamTrace, BeamTuning, MAX_REFLECTIONS, RayScene,
     trace_from_hero,
@@ -92,6 +92,7 @@ impl Plugin for PresentationPlugin {
                 crate::art::tiles::TilesPlugin,
                 crate::art::figures::FiguresPlugin,
                 hud::HudPlugin,
+                crate::droplets::DropletsPlugin,
             ));
     }
 }
@@ -226,61 +227,70 @@ fn spawn_camera(mut commands: Commands) {
     ));
 }
 
-const CHECKPOINT_IDLE: Color = Color::srgb(0.45, 0.47, 0.55);
-const CHECKPOINT_ACTIVE: Color = Color::srgb(0.95, 0.95, 1.0);
+/// A checkpoint's lamp before it's reached, and once lit: lit, it burns
+/// brighter than white, so it blooms.
+const CHECKPOINT_IDLE: Color = Color::srgb(0.5, 0.52, 0.6);
+const CHECKPOINT_LIT: Color = Color::srgb(0.85, 0.95, 1.0);
+const CHECKPOINT_LIGHT: f32 = 2.4;
 
-/// Each checkpoint's own material, so it can light up alone.
+/// How far the lamp's figure sits below the top of the checkpoint, so its
+/// crystal reaches the top; and how far down its cradle the post stops.
+const LAMP_DROP: f32 = 29.0;
+const POST_TOP: f32 = 26.0;
+
+/// A checkpoint's lamp, which lights up when it's reached.
 #[derive(Component, Debug)]
-struct CheckpointMaterial(Handle<ColorMaterial>);
+pub struct CheckpointLamp;
 
-/// Checkpoints are a slim post topped with a diamond, standing on the floor
-/// of their area.
+/// Checkpoints are a crystal lamp on a slim post, standing on the floor of
+/// their area.
 fn draw_checkpoints(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    sheet: Res<Sheet>,
     checkpoints: Query<(Entity, &Checkpoint), Added<Checkpoint>>,
 ) {
     for (entity, checkpoint) in &checkpoints {
-        let material = materials.add(CHECKPOINT_IDLE);
         let size = checkpoint.aabb.size();
-        let diamond = (size.x * 0.4).min(16.0);
-        let post = commands
-            .spawn((
-                Mesh2d(meshes.add(Rectangle::new(4.0, size.y - diamond))),
-                MeshMaterial2d(material.clone()),
-                Transform::from_xyz(0.0, -diamond / 2.0, 0.0),
-            ))
-            .id();
-        let top = commands
-            .spawn((
-                Mesh2d(meshes.add(RegularPolygon::new(diamond, 4))),
-                MeshMaterial2d(material.clone()),
-                Transform::from_xyz(0.0, size.y / 2.0 - diamond, 0.0),
-            ))
-            .id();
-        commands
-            .entity(entity)
-            .insert((
-                Transform::from_translation(checkpoint.aabb.center().extend(-0.5)),
-                Visibility::default(),
-                CheckpointMaterial(material),
-            ))
-            .add_children(&[post, top]);
+        let top = size.y / 2.0;
+        let post_height = (size.y - POST_TOP).max(0.0);
+        let mut post = sheet.sprite(Figure::Post, CHECKPOINT_IDLE);
+        // Only the middle of the post, which is the same all the way up.
+        let inset = (CELL_SIZE / 2.0 - POST_REACH + 2.0) * PX_PER_UNIT;
+        post.rect = post
+            .rect
+            .map(|r| Rect::new(r.min.x, r.min.y + inset, r.max.x, r.max.y - inset));
+        post.custom_size = Some(Vec2::new(CELL_SIZE, post_height));
+        commands.entity(entity).insert((
+            Transform::from_translation(checkpoint.aabb.center().extend(-0.5)),
+            Visibility::default(),
+            children![
+                (
+                    post,
+                    Transform::from_xyz(0.0, -top + post_height / 2.0, 0.0)
+                ),
+                (
+                    CheckpointLamp,
+                    sheet.sprite(Figure::Lamp, CHECKPOINT_IDLE),
+                    Transform::from_xyz(0.0, top - LAMP_DROP, 0.1),
+                ),
+            ],
+        ));
     }
 }
 
 fn light_checkpoints(
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    checkpoints: Query<(&Checkpoint, &CheckpointMaterial), Changed<Checkpoint>>,
+    checkpoints: Query<(&Checkpoint, &Children), Changed<Checkpoint>>,
+    mut lamps: Query<&mut Sprite, With<CheckpointLamp>>,
 ) {
-    for (checkpoint, material) in &checkpoints {
-        if let Some(mut material) = materials.get_mut(&material.0) {
-            material.color = if checkpoint.active {
-                CHECKPOINT_ACTIVE
-            } else {
-                CHECKPOINT_IDLE
-            };
+    for (checkpoint, children) in &checkpoints {
+        for &child in children {
+            if let Ok(mut lamp) = lamps.get_mut(child) {
+                lamp.color = if checkpoint.active {
+                    glowing(CHECKPOINT_LIT, CHECKPOINT_LIGHT)
+                } else {
+                    CHECKPOINT_IDLE
+                };
+            }
         }
     }
 }
@@ -713,33 +723,40 @@ fn draw_orbs(
     }
 }
 
-/// Bursts are rings drawn at unit size and scaled up as they age.
+/// A burst's colour: the light the enemy released, or a warm white.
+fn burst_colour(colour: Option<Primary>) -> Color {
+    let base = colour.map_or(BURST_COLOUR, |c| crate::spectrum_view::hue_colour(c.into()));
+    glowing(base, BURST_LIGHT)
+}
+
+/// Bursts are a spray of sparks from the sprite sheet, in the colour the
+/// enemy released.
 fn draw_bursts(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    bursts: Query<(Entity, &Position), Added<Burst>>,
+    sheet: Res<Sheet>,
+    bursts: Query<(Entity, &Position, &Burst), Added<Burst>>,
 ) {
-    for (entity, pos) in &bursts {
-        commands.entity(entity).insert((
-            Mesh2d(meshes.add(Annulus::new(0.8, 1.0))),
-            MeshMaterial2d(materials.add(glowing(BURST_COLOUR, BURST_LIGHT))),
-            Transform::from_translation(pos.0.extend(4.0)).with_scale(Vec3::ZERO),
-        ));
+    for (entity, pos, burst) in &bursts {
+        let mut sprite = sheet.sprite(Figure::Burst, burst_colour(burst.colour));
+        sprite.custom_size = Some(Vec2::splat(CELL_SIZE * burst.radius / BURST_REACH));
+        commands
+            .entity(entity)
+            .insert((sprite, Transform::from_translation(pos.0.extend(4.0))));
     }
 }
 
-/// Grow each burst ring outward while fading it.
-fn animate_bursts(
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    mut bursts: Query<(&Burst, &mut Transform, &MeshMaterial2d<ColorMaterial>)>,
-) {
-    for (burst, mut transform, material) in &mut bursts {
+/// Step each burst through its frames as it ages, fading it out.
+fn animate_bursts(mut bursts: Query<(&Burst, &mut Sprite)>) {
+    for (burst, mut sprite) in &mut bursts {
         let progress = (burst.age / BURST_LIFETIME).clamp(0.0, 1.0);
-        transform.scale = Vec3::new(burst.radius, burst.radius, 1.0) * progress.max(0.05);
-        if let Some(mut material) = materials.get_mut(&material.0) {
-            material.color = glowing(BURST_COLOUR, BURST_LIGHT).with_alpha(1.0 - progress);
-        }
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let frame = ((progress * BURST_FRAMES as f32) as u32).min(BURST_FRAMES - 1);
+        sprite.rect = Some(Figure::Burst.rect(frame));
+        sprite.color = burst_colour(burst.colour).with_alpha(1.0 - progress * progress);
     }
 }
 
@@ -1303,13 +1320,13 @@ mod tests {
             .iter(world)
             .count();
         assert_eq!(drawn_orbs, 1);
-        // The zero-health mote was defeated, leaving a growing burst.
-        let burst_scale = world
-            .query_filtered::<&Transform, (With<Burst>, With<Mesh2d>)>()
+        // The zero-health mote was defeated, leaving a burst of sparks.
+        let burst = world
+            .query_filtered::<&Sprite, With<Burst>>()
             .single(world)
-            .unwrap()
-            .scale;
-        assert!(burst_scale.x > 0.0);
+            .unwrap();
+        assert!(burst.custom_size.is_some_and(|size| size.x > 0.0));
+        assert!(burst.rect.is_some());
     }
 
     #[test]

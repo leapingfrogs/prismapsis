@@ -45,11 +45,19 @@ pub enum Figure {
     Mote,
     Lens,
     Orb,
+    /// A checkpoint's crystal lamp, lit by tinting.
+    Lamp,
+    /// A checkpoint's post, stretched to its height.
+    Post,
+    /// The sparkle when an enemy is defeated, spreading over its frames.
+    Burst,
+    /// A droplet of colour flying to the hero.
+    Droplet,
 }
 
 impl Figure {
     /// Every figure, in sheet order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 16] = [
         Self::HeroSurface,
         Self::HeroShade,
         Self::Prism,
@@ -62,6 +70,10 @@ impl Figure {
         Self::Mote,
         Self::Lens,
         Self::Orb,
+        Self::Lamp,
+        Self::Post,
+        Self::Burst,
+        Self::Droplet,
     ];
 
     /// Animation frames.
@@ -70,6 +82,7 @@ impl Figure {
         match self {
             Self::Mote => 6,
             Self::Lens | Self::Orb => 4,
+            Self::Burst => BURST_FRAMES,
             _ => 1,
         }
     }
@@ -106,6 +119,10 @@ impl Figure {
             Self::Mote => mote(p, phase),
             Self::Lens => lens(p, frame),
             Self::Orb => orb(p, phase),
+            Self::Lamp => lamp(p),
+            Self::Post => post(p),
+            Self::Burst => burst(p, phase),
+            Self::Droplet => droplet(p),
         }
     }
 }
@@ -458,6 +475,91 @@ fn lens(p: Vec2, frame: u32) -> Grey {
         grey += (-(across / 3.0).powi(2)).exp() * 0.45;
     }
     Grey(grey.clamp(0.0, 1.0), cover(outer))
+}
+
+/// Frames in a burst.
+pub const BURST_FRAMES: u32 = 5;
+
+/// How far a burst's sparkle reaches at its widest, in world units from
+/// the cell's centre.
+pub const BURST_REACH: f32 = 30.0;
+
+/// A checkpoint lamp: a long crystal with lit facets and a bright heart,
+/// held in a small cradle on top of its post. Drawn in the top half of the
+/// cell, so the cell's centre sits on the post.
+fn lamp(p: Vec2) -> Grey {
+    // The crystal: pointed top and bottom, widest a little below centre.
+    let centre = Vec2::new(0.0, 15.0);
+    let q = p - centre;
+    let (half_width, half_height) = (9.0, 14.0);
+    let shape = q.x.abs() / half_width + q.y.abs() / half_height - 1.0;
+    let inside = cover(shape * half_width);
+    // Facets: lit on the upper left, shaded on the lower right, with a
+    // ridge down the middle.
+    let facet = if q.x < 0.0 { 0.78 } else { 0.55 } + if q.y > 0.0 { 0.12 } else { -0.05 };
+    let ridge = 1.0 - (q.x.abs() / 0.8).min(1.0);
+    let heart = (-(q.length() / 3.5).powi(2)).exp();
+    let crystal = Grey((facet + 0.2 * ridge + 0.5 * heart).min(1.0), inside);
+    // The cradle: a short cup under the crystal.
+    let cup = Vec2::new(p.x, p.y - 3.5);
+    let cradle_shape = (cup.x.abs() - 5.0 + cup.y.max(0.0) * 0.4).max(cup.y.abs() - 2.0);
+    let cradle = Grey(
+        0.45 + 0.2 * f32::from(u8::from(p.x < 0.0)),
+        cover(cradle_shape),
+    );
+    crystal.over(cradle)
+}
+
+/// How far up and down a checkpoint post runs from its cell's centre; drawn
+/// from inside this, it stretches to any height.
+pub const POST_REACH: f32 = 28.0;
+
+/// A checkpoint post: a slim rod lit from the left, the same all the way
+/// up so it stretches to any height.
+fn post(p: Vec2) -> Grey {
+    let half = 2.0;
+    let across = (p.x / half).clamp(-1.0, 1.0);
+    let lit = 0.7 - 0.3 * across;
+    Grey(
+        lit,
+        cover(p.x.abs() - half).min(cover(p.y.abs() - POST_REACH)),
+    )
+}
+
+/// A burst of sparks: eight rays and eight dots that fly out from the
+/// centre and fade over the frames (`phase`, 0 to 1).
+fn burst(p: Vec2, phase: f32) -> Grey {
+    let reach = BURST_REACH * (0.35 + 0.65 * phase);
+    let fade = 1.0 - phase * 0.6;
+    let mut sparks = Grey(1.0, 0.0);
+    for k in 0..8u8 {
+        let angle = f32::from(k) * PI / 4.0 + phase * 0.4;
+        let dir = Vec2::from_angle(angle);
+        let along = p.dot(dir);
+        let across = p.perp_dot(dir).abs();
+        // A streak just inside the edge, shortening as it goes.
+        let length = 8.0 * (1.0 - phase) + 2.0;
+        let from = reach - length;
+        let on_ray = along > from && along < reach;
+        if on_ray {
+            let fall = 1.0 - (reach - along) / length;
+            sparks = Grey(1.0, sparks.1.max(cover(across - 0.9) * (0.4 + 0.6 * fall)));
+        }
+        // A dot between each pair of rays, a little behind them.
+        let between = Vec2::from_angle(angle + PI / 8.0) * reach * 0.75;
+        let dot = cover(p.distance(between) - 1.6 * (1.0 - phase * 0.5));
+        sparks = Grey(1.0, sparks.1.max(dot));
+    }
+    // A soft flash at the centre that fades fast.
+    let flash = (-(p.length() / 7.0).powi(2)).exp() * (1.0 - phase).powi(2);
+    sparks.over(Grey(1.0, flash)).fade(fade)
+}
+
+/// A droplet of light: a bright bead in a soft glow.
+fn droplet(p: Vec2) -> Grey {
+    let r = p.length();
+    let glow = Grey(1.0, (-(r / 6.0).powi(2)).exp() * 0.6);
+    Grey(1.0, cover(r - 3.0)).over(glow)
 }
 
 /// A glowing shot with two bright arcs circling it over the loop

@@ -11,6 +11,7 @@ use bevy::audio::{AudioSinkPlayback, Volume};
 use bevy::prelude::*;
 
 use crate::beam::{BeamEnergy, BeamTuning};
+use crate::droplets::DropletLanded;
 use crate::enemy::EnemyKind;
 use crate::events::GameEvent;
 use crate::light::{Hue, Primary};
@@ -42,6 +43,7 @@ pub enum SoundId {
     PickupExpiring,
     AbilitiesLost,
     LightAbsorb,
+    DropletTick,
     ColourRestored,
     SpectrumComplete,
     LevelComplete,
@@ -97,6 +99,7 @@ sound_files! {
     PickupExpiring => "pickup_expiring",
     AbilitiesLost => "abilities_lost",
     LightAbsorb => "light_absorb",
+    DropletTick => "droplet_tick",
     ColourRestored => "colour_restored",
     SpectrumComplete => "spectrum_complete",
     LevelComplete => "level_complete",
@@ -295,7 +298,7 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
                 .speed(lydian_speed(power_up_degree(power))),
         ],
         GameEvent::PickupExpiring { at } => vec![Cue::new(SoundId::PickupExpiring).at(at)],
-        GameEvent::LightAbsorbed { colour, at } => vec![
+        GameEvent::LightAbsorbed { colour, at, .. } => vec![
             Cue::new(SoundId::LightAbsorb)
                 .at(at)
                 .speed(lydian_speed(primary_degree(colour)))
@@ -375,12 +378,14 @@ impl Plugin for SoundPlugin {
             .register_type::<SoundSettings>()
             .init_resource::<Auditions>()
             .init_resource::<KillCombo>()
+            .add_message::<DropletLanded>()
             .add_systems(Startup, (load_sounds, spawn_listener).chain())
             .add_systems(Startup, spawn_beam_loops.after(load_sounds))
             .add_systems(
                 Update,
                 (
                     queue_event_cues,
+                    queue_droplet_cues,
                     queue_state_cues,
                     queue_auditions,
                     play_pending_cues,
@@ -464,6 +469,26 @@ fn queue_event_cues(
         for cue in cues_for(event, &mut combo) {
             queue(&mut commands, cue);
         }
+    }
+}
+
+/// How loud each droplet's tick is: soft, as a lens sends eight.
+const DROPLET_VOLUME: f32 = 0.35;
+
+/// The tick as a droplet of colour reaches the hero, pitched from its
+/// colour and climbing the scale with each droplet in a stream.
+#[must_use]
+pub fn droplet_cue(landed: DropletLanded) -> Cue {
+    let degree = primary_degree(landed.colour) + landed.step.min(14);
+    Cue::new(SoundId::DropletTick)
+        .at(landed.at)
+        .speed(lydian_speed(degree))
+        .volume(DROPLET_VOLUME)
+}
+
+fn queue_droplet_cues(mut commands: Commands, mut landed: MessageReader<DropletLanded>) {
+    for &droplet in landed.read() {
+        queue(&mut commands, droplet_cue(droplet));
     }
 }
 
@@ -712,6 +737,7 @@ mod tests {
             GameEvent::LightAbsorbed {
                 colour: Primary::Green,
                 at,
+                amount: 1.0,
             },
             GameEvent::ColourRestored { hue: Hue::Blue },
             GameEvent::ColourRestored { hue: Hue::Cyan },
