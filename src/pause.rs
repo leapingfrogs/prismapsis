@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::hud::{self, HudArt};
 use crate::screens::{Screen, in_play};
 
 #[derive(Debug, Default)]
@@ -49,24 +50,51 @@ fn toggle_pause(
 #[derive(Component, Debug)]
 pub struct PauseOverlay;
 
-pub fn spawn_overlay(mut commands: Commands) {
+/// The pause overlay's hint, which says how to resume.
+#[derive(Component, Debug)]
+pub struct PauseHint;
+
+/// The hint while keys are in use.
+pub const KEY_HINT: &str = "P to resume";
+
+/// "Paused" on a glass panel in the middle of the view, with a hint below.
+pub fn spawn_overlay(mut commands: Commands, art: Option<Res<HudArt>>) {
+    let art = art.as_deref().cloned().unwrap_or_default();
     commands.spawn((
         Name::new("Pause overlay"),
         PauseOverlay,
-        Text::new("Paused\nP to resume"),
-        TextLayout::justify(Justify::Center),
-        TextFont {
-            font_size: FontSize::Vh(6.0),
-            ..default()
-        },
-        TextColor(Color::WHITE),
         Node {
             position_type: PositionType::Absolute,
-            top: Val::Vh(40.0),
+            top: Val::Vh(36.0),
             justify_self: JustifySelf::Center,
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            row_gap: Val::VMin(1.0),
+            padding: UiRect::axes(Val::VMin(8.0), Val::VMin(4.5)),
             ..default()
         },
         Visibility::Hidden,
+        children![
+            hud::panel(&art),
+            (
+                Text::new("Paused"),
+                TextFont {
+                    font_size: FontSize::VMin(7.0),
+                    weight: FontWeight::SEMIBOLD,
+                    ..default()
+                },
+                TextColor(Color::WHITE),
+            ),
+            (
+                PauseHint,
+                Text::new(KEY_HINT),
+                TextFont {
+                    font_size: FontSize::VMin(3.0),
+                    ..default()
+                },
+                TextColor(Color::srgb(0.7, 0.72, 0.8)),
+            ),
+        ],
     ));
 }
 

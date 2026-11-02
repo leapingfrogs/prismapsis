@@ -10,7 +10,10 @@
 use bevy::prelude::*;
 
 use crate::enemy::{KeepAbilities, ResetRoom, reset_room};
+use bevy::ecs::system::SystemParam;
+
 use crate::events::GameEvent;
+use crate::hud::{self, HudArt};
 use crate::level::{Campaign, CurrentLevel};
 use crate::score::{Score, grouped};
 use crate::sound::{Auditions, SoundId, SoundSettings};
@@ -231,8 +234,62 @@ fn text(content: impl Into<String>, size: f32, colour: Color) -> impl Bundle {
 
 /// A screen over the shaded level: a heading, lines of text, a menu and
 /// a footer in small print.
+/// The art menus are drawn with, where it's loaded; headless tests run
+/// without it.
+#[derive(SystemParam)]
+struct MenuArt<'w> {
+    hud: Option<Res<'w, HudArt>>,
+}
+
+impl MenuArt<'_> {
+    fn looks(&self) -> Looks {
+        Looks {
+            hud: self.hud.as_deref().cloned().unwrap_or_default(),
+            glow: self
+                .hud
+                .as_ref()
+                .map(|h| h.fill.clone())
+                .unwrap_or_default(),
+        }
+    }
+}
+
+/// The images a screen is built from.
+struct Looks {
+    hud: HudArt,
+    /// A soft band of light, behind the selected line.
+    glow: Handle<Image>,
+}
+
+/// The logo: the emblem, a beam split by a prism, over the name in
+/// shimmering spectrum letters.
+fn spawn_logo(root: &mut ChildSpawnerCommands, looks: &Looks) {
+    root.spawn((
+        Node {
+            width: Val::VMin(LOGO_WIDTH),
+            height: Val::VMin(LOGO_WIDTH * 160.0 / 384.0),
+            ..default()
+        },
+        ImageNode::new(looks.hud.emblem.clone()),
+    ));
+    hud::spectrum_text(root, "Prismapsis", HEADING_SIZE + 3.0);
+}
+
+/// How wide the logo's emblem is, as a percentage of the window's smaller
+/// side.
+const LOGO_WIDTH: f32 = 46.0;
+
+/// The glow behind the selected line.
+const SELECTED_GLOW: Color = Color::srgba(0.6, 0.8, 1.0, 0.22);
+
+/// The glow behind one of a menu's lines, by the line's index.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MenuGlow(pub usize);
+
+#[allow(clippy::too_many_arguments)]
 fn spawn_screen(
     commands: &mut Commands,
+    looks: &Looks,
     screen: Screen,
     heading: &str,
     lines: &[String],
@@ -259,23 +316,46 @@ fn spawn_screen(
             GlobalZIndex(10),
         ))
         .with_children(|root| {
-            root.spawn(text(heading, 10.0, Color::WHITE));
+            if screen == Screen::Title {
+                spawn_logo(root, looks);
+            } else {
+                root.spawn(text(heading, 10.0, Color::WHITE));
+            }
             for line in lines {
                 root.spawn(text(line.clone(), 3.5, Color::WHITE));
             }
+            // The menu sits on a glass panel; the selected line glows.
             root.spawn((
                 Menu::new(choices, now),
                 Node {
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::VMin(1.0),
-                    margin: UiRect::vertical(Val::VMin(4.0)),
+                    align_items: AlignItems::Stretch,
+                    row_gap: Val::VMin(0.6),
+                    margin: UiRect::vertical(Val::VMin(3.0)),
+                    padding: UiRect::axes(Val::VMin(4.0), Val::VMin(3.0)),
+                    min_width: Val::VMin(44.0),
                     ..default()
                 },
             ))
             .with_children(|menu| {
+                menu.spawn(hud::panel(&looks.hud));
                 for index in 0..count {
-                    menu.spawn((MenuLine(index), text("", 4.5, UNSELECTED_COLOUR)));
+                    menu.spawn((
+                        MenuGlow(index),
+                        Node {
+                            justify_content: JustifyContent::Center,
+                            padding: UiRect::axes(Val::VMin(3.0), Val::VMin(0.4)),
+                            border_radius: BorderRadius::all(Val::VMin(3.0)),
+                            ..default()
+                        },
+                        ImageNode {
+                            image: looks.glow.clone(),
+                            color: Color::NONE,
+                            image_mode: NodeImageMode::Stretch,
+                            ..default()
+                        },
+                        children![(MenuLine(index), text("", 4.5, UNSELECTED_COLOUR))],
+                    ));
                 }
             });
             if !footer.is_empty() {
@@ -284,13 +364,14 @@ fn spawn_screen(
         });
 }
 
-fn spawn_title(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>) {
+fn spawn_title(mut commands: Commands, art: MenuArt, score: Res<Score>, time: Res<Time<Real>>) {
     let mut lines = Vec::new();
     if score.best > 0 {
         lines.push(format!("Best {}", grouped(score.best)));
     }
     spawn_screen(
         &mut commands,
+        &art.looks(),
         Screen::Title,
         "Prismapsis",
         &lines,
@@ -300,9 +381,10 @@ fn spawn_title(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>)
     );
 }
 
-fn spawn_settings(mut commands: Commands, time: Res<Time<Real>>) {
+fn spawn_settings(mut commands: Commands, art: MenuArt, time: Res<Time<Real>>) {
     spawn_screen(
         &mut commands,
+        &art.looks(),
         Screen::Settings,
         "Settings",
         &[],
@@ -334,9 +416,10 @@ fn score_lines(score: Score) -> Vec<String> {
     ]
 }
 
-fn spawn_game_over(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>) {
+fn spawn_game_over(mut commands: Commands, art: MenuArt, score: Res<Score>, time: Res<Time<Real>>) {
     spawn_screen(
         &mut commands,
+        &art.looks(),
         Screen::GameOver,
         "Game over",
         &score_lines(*score),
@@ -346,9 +429,10 @@ fn spawn_game_over(mut commands: Commands, score: Res<Score>, time: Res<Time<Rea
     );
 }
 
-fn spawn_finished(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>) {
+fn spawn_finished(mut commands: Commands, art: MenuArt, score: Res<Score>, time: Res<Time<Real>>) {
     spawn_screen(
         &mut commands,
+        &art.looks(),
         Screen::Finished,
         "Every colour restored",
         &score_lines(*score),
@@ -431,11 +515,12 @@ fn choose(
     }
 }
 
-/// Show each choice, the selected one brighter and marked.
+/// Show each choice, the selected one brighter with light behind it.
 fn highlight(
     menus: Query<&Menu>,
     settings: Option<Res<SoundSettings>>,
     mut lines: Query<(&MenuLine, &mut Text, &mut TextColor)>,
+    mut glows: Query<(&MenuGlow, &mut ImageNode)>,
 ) {
     let Ok(menu) = menus.single() else {
         return;
@@ -445,12 +530,7 @@ fn highlight(
             continue;
         };
         let selected = line.0 == menu.selected;
-        let label = choice.label(settings.as_deref());
-        let wanted = if selected {
-            format!("- {label} -")
-        } else {
-            label
-        };
+        let wanted = choice.label(settings.as_deref());
         if text.0 != wanted {
             text.0 = wanted;
         }
@@ -459,6 +539,16 @@ fn highlight(
         } else {
             UNSELECTED_COLOUR
         };
+    }
+    for (glow, mut image) in &mut glows {
+        let wanted = if glow.0 == menu.selected {
+            SELECTED_GLOW
+        } else {
+            Color::NONE
+        };
+        if image.color != wanted {
+            image.color = wanted;
+        }
     }
 }
 
@@ -539,6 +629,20 @@ mod tests {
         lines.into_iter().map(|(_, text)| text).collect()
     }
 
+    /// The selected line, as an index; its glow is lit and no other.
+    fn selected(app: &mut App) -> usize {
+        let index = menu(app).unwrap().selected;
+        let world = app.world_mut();
+        let lit: Vec<usize> = world
+            .query::<(&MenuGlow, &ImageNode)>()
+            .iter(world)
+            .filter(|(_, image)| image.color != Color::NONE)
+            .map(|(glow, _)| glow.0)
+            .collect();
+        assert_eq!(lit, [index]);
+        index
+    }
+
     fn score(app: &mut App, points: u32) {
         *app.world_mut().resource_mut::<Score>() = Score {
             points,
@@ -560,7 +664,8 @@ mod tests {
         let still = hero(&mut app);
         run(&mut app, 20);
         assert_eq!(hero(&mut app), still);
-        assert_eq!(lines(&mut app), ["- Play -", "Settings", "Quit"]);
+        assert_eq!(lines(&mut app), ["Play", "Settings", "Quit"]);
+        assert_eq!(selected(&mut app), 0);
 
         // P doesn't pause from a menu.
         tap(&mut app, KeyCode::KeyP);
@@ -585,7 +690,8 @@ mod tests {
         let mut app = app(Screen::Title);
         wait_for_menu(&mut app);
         tap(&mut app, KeyCode::ArrowDown);
-        assert_eq!(lines(&mut app), ["Play", "- Settings -", "Quit"]);
+        assert_eq!(lines(&mut app), ["Play", "Settings", "Quit"]);
+        assert_eq!(selected(&mut app), 1);
         tap(&mut app, KeyCode::ArrowDown);
         tap(&mut app, KeyCode::ArrowDown);
         assert_eq!(menu(&mut app).unwrap().selected, 0);
@@ -608,8 +714,9 @@ mod tests {
         wait_for_menu(&mut app);
         assert_eq!(
             lines(&mut app),
-            ["- Volume 80% -", "Music 60%", "Effects 100%", "Back"]
+            ["Volume 80%", "Music 60%", "Effects 100%", "Back"]
         );
+        assert_eq!(selected(&mut app), 0);
 
         // Music down twice, then effects up past the top.
         tap(&mut app, KeyCode::ArrowDown);
@@ -622,8 +729,9 @@ mod tests {
         assert!((settings.effects - 1.0).abs() < f32::EPSILON);
         assert_eq!(
             lines(&mut app),
-            ["Volume 80%", "Music 40%", "- Effects 100% -", "Back"]
+            ["Volume 80%", "Music 40%", "Effects 100%", "Back"]
         );
+        assert_eq!(selected(&mut app), 2);
         // Changing the effects plays one to hear it by; the music can be
         // heard already.
         assert_eq!(app.world().resource::<Auditions>().0, [SoundId::Checkpoint]);
@@ -641,7 +749,8 @@ mod tests {
         tap(&mut app, KeyCode::ArrowRight);
         tap(&mut app, KeyCode::Enter);
         assert_eq!(screen(&app), Screen::Settings);
-        assert_eq!(lines(&mut app)[0], "- Volume 80% -");
+        assert_eq!(lines(&mut app)[0], "Volume 80%");
+        assert_eq!(selected(&mut app), 0);
     }
 
     #[test]
@@ -653,7 +762,8 @@ mod tests {
         send(&mut app, GameEvent::OutOfLives);
         assert_eq!(screen(&app), Screen::GameOver);
         assert!(paused(&app));
-        assert_eq!(lines(&mut app), ["- Continue -", "Back to the title"]);
+        assert_eq!(lines(&mut app), ["Continue", "Back to the title"]);
+        assert_eq!(selected(&mut app), 0);
 
         wait_for_menu(&mut app);
         tap(&mut app, KeyCode::Enter);

@@ -18,6 +18,7 @@ use bevy::window::PrimaryWindow;
 
 use crate::art::touch::Glyph;
 use crate::hud::HudArt;
+use crate::pause::{KEY_HINT, PauseHint};
 use crate::powerup::{Abilities, PowerUp};
 use crate::screens::{Choice, Menu, MenuLine, Screen, in_play};
 
@@ -117,10 +118,12 @@ pub struct TouchOverlay;
 #[derive(Component, Debug)]
 pub struct HoldGlyph;
 
-const BUTTON_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.16);
-const PRESSED_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.4);
-const EDGE_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.45);
-const GLYPH_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.8);
+// Faint, so the buttons don't hide the play behind them; a pressed button
+// lights up clearly.
+const BUTTON_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.06);
+const PRESSED_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.3);
+const EDGE_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.22);
+const GLYPH_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.45);
 
 /// How much of a button's width its symbol takes.
 const GLYPH_SCALE: f32 = 0.5;
@@ -142,7 +145,7 @@ impl Plugin for TouchPlugin {
                     .chain()
                     .after(InputSystems),
             )
-            .add_systems(Update, update_controls);
+            .add_systems(Update, (update_controls, hint_pause));
     }
 }
 
@@ -554,6 +557,19 @@ fn update_controls(
     }
 }
 
+/// The hint while the touch buttons show.
+pub const TOUCH_HINT: &str = "Tap pause to resume";
+
+/// The pause overlay says how to resume with whatever is in use.
+fn hint_pause(controls: Res<TouchControls>, mut hints: Query<&mut Text, With<PauseHint>>) {
+    let wanted = if controls.shown { TOUCH_HINT } else { KEY_HINT };
+    for mut hint in &mut hints {
+        if hint.0 != wanted {
+            wanted.clone_into(&mut hint.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -893,5 +909,23 @@ mod tests {
         assert!(paused(&app));
         tap(&mut app, 2);
         assert!(!paused(&app));
+    }
+
+    #[test]
+    fn the_pause_hint_says_how_to_resume_with_what_is_in_use() {
+        let mut app = app();
+        let hint = app.world_mut().spawn((PauseHint, Text::new(KEY_HINT))).id();
+        touch(&mut app, 1, TouchPhase::Started, Vec2::ZERO);
+        assert_eq!(app.world().get::<Text>(hint).unwrap().0, TOUCH_HINT);
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::Space,
+            logical_key: bevy::input::keyboard::Key::Space,
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert_eq!(app.world().get::<Text>(hint).unwrap().0, KEY_HINT);
     }
 }
