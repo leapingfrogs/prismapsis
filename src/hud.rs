@@ -1,6 +1,8 @@
-//! The heads-up display's look, shared by its parts: the game's font, the
-//! glass tubes the energy bar and spectrum gauges fill with light, and
-//! icons drawn from the sprite sheet. Presentation only.
+//! The heads-up display's look, shared by its parts. Presentation only.
+//!
+//! The game's font, the glass tubes the energy bar and spectrum gauges fill
+//! with light, the touch buttons' symbols, and icons drawn from the sprite
+//! sheet.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{CompressedImageFormats, ImageSampler, ImageType};
@@ -18,6 +20,7 @@ const FONT: &[u8] = include_bytes!("../assets/fonts/Exo2.ttf");
 /// The HUD's art, painted by `just art`.
 const TUBE: &[u8] = include_bytes!("../assets/art/hud_tube.png");
 const FILL: &[u8] = include_bytes!("../assets/art/hud_fill.png");
+const GLYPHS: &[u8] = include_bytes!("../assets/art/touch_glyphs.png");
 
 /// How far the light sits inside a tube's glass, as a fraction of its
 /// height.
@@ -39,11 +42,12 @@ impl Plugin for HudPlugin {
     }
 }
 
-/// The glass tube and the light that fills it.
+/// The glass tube, the light that fills it and the touch buttons' symbols.
 #[derive(Resource, Debug, Clone, Default)]
 pub struct HudArt {
     pub tube: Handle<Image>,
     pub fill: Handle<Image>,
+    pub glyphs: Handle<Image>,
 }
 
 /// Without images (headless tests), the handles are left empty.
@@ -69,6 +73,7 @@ fn load_art(mut commands: Commands, mut images: Option<ResMut<Assets<Image>>>) {
     commands.insert_resource(HudArt {
         tube: load("HUD tube", TUBE),
         fill: load("HUD fill", FILL),
+        glyphs: load("touch glyphs", GLYPHS),
     });
 }
 

@@ -16,6 +16,8 @@ use bevy::input::touch::{Touch, Touches};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
+use crate::art::touch::Glyph;
+use crate::hud::HudArt;
 use crate::powerup::{Abilities, PowerUp};
 use crate::screens::{Choice, Menu, MenuLine, Screen, in_play};
 
@@ -111,17 +113,17 @@ pub fn slide_key(slide: [KeyCode; 2], dy: f32, height: f32) -> Option<KeyCode> {
 #[derive(Component, Debug)]
 pub struct TouchOverlay;
 
-/// The hold button's label, which says whether it's locked.
+/// The hold button's symbol, a lock shown open or closed.
 #[derive(Component, Debug)]
-pub struct HoldLabel;
-
-const HOLD_TEXT: &str = "Hold";
-const HELD_TEXT: &str = "Held";
+pub struct HoldGlyph;
 
 const BUTTON_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.16);
 const PRESSED_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.4);
 const EDGE_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.45);
-const LABEL_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.8);
+const GLYPH_COLOUR: Color = Color::srgba(1.0, 1.0, 1.0, 0.8);
+
+/// How much of a button's width its symbol takes.
+const GLYPH_SCALE: f32 = 0.5;
 
 /// How far from a menu line a tap still chooses it, in line heights: most
 /// of the gap above and below, and well out to either side.
@@ -338,18 +340,18 @@ fn nearest_line(
         .map(|(index, offset)| (index, offset.x > 0.0))
 }
 
-/// A button: a translucent rounded square with a label.
-fn button(button: TouchButton, label: &str, size: f32) -> impl Bundle {
+/// A button: a translucent rounded square with a symbol, named `name`.
+fn button(button: TouchButton, name: &str, art: &HudArt, glyph: Glyph, size: f32) -> impl Bundle {
     (
-        square(button, label, size),
-        children![button_label(label, size)],
+        square(button, name, size),
+        children![button_glyph(art, glyph, size)],
     )
 }
 
-/// A button's rounded square, without its label.
-fn square(button: TouchButton, label: &str, size: f32) -> impl Bundle {
+/// A button's rounded square, without its symbol.
+fn square(button: TouchButton, name: &str, size: f32) -> impl Bundle {
     (
-        Name::new(format!("Touch {label}")),
+        Name::new(format!("Touch {name}")),
         button,
         Node {
             width: Val::VMin(size),
@@ -365,15 +367,21 @@ fn square(button: TouchButton, label: &str, size: f32) -> impl Bundle {
     )
 }
 
-/// The label on a button `size` across.
-fn button_label(label: &str, size: f32) -> impl Bundle {
+/// The symbol on a button `size` across. Exo 2 has no arrows, stars or
+/// locks, so they come from generated art rather than text.
+fn button_glyph(art: &HudArt, glyph: Glyph, size: f32) -> impl Bundle {
     (
-        Text::new(label),
-        TextFont {
-            font_size: FontSize::VMin(size / 3.5),
+        Node {
+            width: Val::VMin(size * GLYPH_SCALE),
+            height: Val::VMin(size * GLYPH_SCALE),
             ..default()
         },
-        TextColor(LABEL_COLOUR),
+        ImageNode {
+            image: art.glyphs.clone(),
+            color: GLYPH_COLOUR,
+            rect: Some(glyph.rect()),
+            ..default()
+        },
     )
 }
 
@@ -392,7 +400,9 @@ fn group(direction: FlexDirection) -> Node {
 /// above it in reach of the same thumb, sliding hold up turning the prism
 /// anticlockwise and down clockwise, as Q and E do; pause at the top
 /// right, under the score.
-fn spawn_controls(mut commands: Commands) {
+fn spawn_controls(mut commands: Commands, art: Option<Res<HudArt>>) {
+    // Without the HUD's art (headless tests), the symbols are left empty.
+    let art = &art.as_deref().cloned().unwrap_or_default();
     commands.spawn((
         Name::new("Touch controls"),
         TouchOverlay,
@@ -414,7 +424,13 @@ fn spawn_controls(mut commands: Commands) {
                     margin: UiRect::top(Val::Vh(6.0)),
                     ..default()
                 },
-                children![button(TouchButton::new(KeyCode::KeyP), "Pause", 11.0)],
+                children![button(
+                    TouchButton::new(KeyCode::KeyP),
+                    "Pause",
+                    art,
+                    Glyph::Pause,
+                    11.0
+                )],
             ),
             (
                 Node {
@@ -426,17 +442,37 @@ fn spawn_controls(mut commands: Commands) {
                     (
                         group(FlexDirection::Column),
                         children![
-                            button(TouchButton::new(KeyCode::ArrowUp).hovering(), "Up", 15.0),
+                            button(
+                                TouchButton::new(KeyCode::ArrowUp).hovering(),
+                                "Up",
+                                art,
+                                Glyph::Up,
+                                15.0
+                            ),
                             button(
                                 TouchButton::new(KeyCode::ArrowDown).hovering(),
                                 "Down",
+                                art,
+                                Glyph::Down,
                                 15.0
                             ),
                             (
                                 group(FlexDirection::Row),
                                 children![
-                                    button(TouchButton::new(KeyCode::ArrowLeft), "<", 19.0),
-                                    button(TouchButton::new(KeyCode::ArrowRight), ">", 19.0),
+                                    button(
+                                        TouchButton::new(KeyCode::ArrowLeft),
+                                        "Left",
+                                        art,
+                                        Glyph::Left,
+                                        19.0
+                                    ),
+                                    button(
+                                        TouchButton::new(KeyCode::ArrowRight),
+                                        "Right",
+                                        art,
+                                        Glyph::Right,
+                                        19.0
+                                    ),
                                 ],
                             ),
                         ],
@@ -448,12 +484,18 @@ fn spawn_controls(mut commands: Commands) {
                                 square(
                                     TouchButton::new(KeyCode::ShiftLeft)
                                         .sliding(KeyCode::KeyQ, KeyCode::KeyE),
-                                    HOLD_TEXT,
+                                    "Hold",
                                     15.0,
                                 ),
-                                children![(button_label(HOLD_TEXT, 15.0), HoldLabel)],
+                                children![(button_glyph(art, Glyph::Unlocked, 15.0), HoldGlyph)],
                             ),
-                            button(TouchButton::new(KeyCode::Space), "Fire", 24.0),
+                            button(
+                                TouchButton::new(KeyCode::Space),
+                                "Fire",
+                                art,
+                                Glyph::Fire,
+                                24.0
+                            ),
                         ],
                     ),
                 ],
@@ -463,8 +505,8 @@ fn spawn_controls(mut commands: Commands) {
 }
 
 /// Show the buttons in play once touched, the hover buttons only with
-/// anti-gravity, pressed or locked buttons brighter, and hold's label
-/// saying whether it's locked.
+/// anti-gravity, pressed or locked buttons brighter, and hold's lock
+/// closed while it's locked.
 fn update_controls(
     controls: Res<TouchControls>,
     screen: Option<Res<State<Screen>>>,
@@ -474,16 +516,16 @@ fn update_controls(
         (&TouchButton, &mut Visibility, &mut BackgroundColor),
         Without<TouchOverlay>,
     >,
-    mut labels: Query<&mut Text, With<HoldLabel>>,
+    mut glyphs: Query<&mut ImageNode, With<HoldGlyph>>,
 ) {
-    let wanted = if controls.locked {
-        HELD_TEXT
+    let wanted = Some(if controls.locked {
+        Glyph::Locked.rect()
     } else {
-        HOLD_TEXT
-    };
-    for mut text in &mut labels {
-        if text.0 != wanted {
-            wanted.clone_into(&mut text.0);
+        Glyph::Unlocked.rect()
+    });
+    for mut image in &mut glyphs {
+        if image.rect != wanted {
+            image.rect = wanted;
         }
     }
     let shown = controls.shown && in_play(screen);
@@ -643,22 +685,22 @@ mod tests {
         app.world().resource::<TouchControls>().locked
     }
 
-    /// The hold label's text and the colour of the buttons holding Shift.
-    fn hold_looks(app: &mut App) -> (String, Vec<Color>) {
+    /// The hold symbol's place in the art and the colour of the buttons
+    /// holding Shift.
+    fn hold_looks(app: &mut App) -> (Option<Rect>, Vec<Color>) {
         let world = app.world_mut();
-        let text = world
-            .query_filtered::<&Text, With<HoldLabel>>()
+        let glyph = world
+            .query_filtered::<&ImageNode, With<HoldGlyph>>()
             .single(world)
             .unwrap()
-            .0
-            .clone();
+            .rect;
         let colours = world
             .query::<(&TouchButton, &BackgroundColor)>()
             .iter(world)
             .filter(|(button, _)| button.key == KeyCode::ShiftLeft)
             .map(|(_, colour)| colour.0)
             .collect();
-        (text, colours)
+        (glyph, colours)
     }
 
     #[test]
@@ -674,8 +716,8 @@ mod tests {
         assert!(keys(&app).pressed(KeyCode::ShiftLeft));
         app.update();
         assert!(keys(&app).pressed(KeyCode::ShiftLeft));
-        let (text, colours) = hold_looks(&mut app);
-        assert_eq!(text, HELD_TEXT);
+        let (glyph, colours) = hold_looks(&mut app);
+        assert_eq!(glyph, Some(Glyph::Locked.rect()));
         assert!(colours.iter().all(|&colour| colour == PRESSED_COLOUR));
 
         // Another finger on fire doesn't touch the lock.
@@ -694,8 +736,8 @@ mod tests {
         touch(&mut app, 3, TouchPhase::Ended, spot);
         assert!(!locked(&app));
         assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
-        let (text, colours) = hold_looks(&mut app);
-        assert_eq!(text, HOLD_TEXT);
+        let (glyph, colours) = hold_looks(&mut app);
+        assert_eq!(glyph, Some(Glyph::Unlocked.rect()));
         assert!(colours.iter().all(|&colour| colour == BUTTON_COLOUR));
 
         // A cancelled touch isn't a tap.

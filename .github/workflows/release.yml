@@ -3,10 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
-  # Manual runs build every platform as workflow artifacts without releasing,
-  # and can publish the web build to GitHub Pages from main.
+  # Manual runs build the web version, and the desktop versions if asked, as
+  # workflow artifacts without releasing, and can publish the web build to
+  # GitHub Pages from main.
   workflow_dispatch:
     inputs:
+      desktop:
+        description: Build the Linux, Windows and macOS versions too
+        type: boolean
+        default: false
       pages:
         description: Publish the web build to GitHub Pages
         type: boolean
@@ -40,7 +45,7 @@ jobs:
     if: >-
       always() &&
       (needs.release-please.outputs.release_created == 'true' ||
-       github.event_name == 'workflow_dispatch')
+       (github.event_name == 'workflow_dispatch' && inputs.desktop))
     permissions:
       contents: write
     strategy:
@@ -69,6 +74,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
+          # Saved only from main, to stay under GitHub's cache limit.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         id: package
@@ -122,6 +129,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-web
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # wasm-bindgen-cli must match the wasm-bindgen crate in Cargo.lock.
       - id: versions
         run: |

@@ -52,7 +52,7 @@ pub struct GamePlugin {
     /// the file it came from (watched for edits in dev builds).
     pub level: Option<(level::Level, std::path::PathBuf)>,
     /// Where the player's settings are kept, if anywhere.
-    pub settings: Option<std::path::PathBuf>,
+    pub settings: Option<settings::Store>,
 }
 
 impl Plugin for GamePlugin {
@@ -77,7 +77,7 @@ impl Plugin for GamePlugin {
                 score::ScorePlugin,
                 screens::ScreensPlugin { start },
                 settings::SettingsPlugin {
-                    path: self.settings.clone(),
+                    store: self.settings.clone(),
                 },
                 touch::TouchPlugin,
             ));

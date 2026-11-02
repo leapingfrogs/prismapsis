@@ -40,7 +40,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # Caches are saved only from main, to stay under GitHub's cache limit;
+      # every branch restores them.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   web:
@@ -55,6 +59,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: web
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       # The game for the browser; the command-line tools only run natively.
       - run: cargo clippy --locked --target wasm32-unknown-unknown --lib --bin prismapsis -- -D warnings
 
@@ -68,6 +73,8 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov
@@ -163,4 +170,6 @@ jobs:
         with:
           toolchain: ${{ steps.msrv.outputs.version }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo check --all-targets --locked

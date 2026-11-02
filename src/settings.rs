@@ -1,5 +1,6 @@
-//! The player's settings, kept between runs in a small TOML file: the
-//! master, music and effects volumes.
+//! The player's settings, kept between runs as a few lines of TOML: the
+//! master, music and effects volumes. The desktop game keeps them in a
+//! file, and the browser in its local storage.
 
 use std::path::{Path, PathBuf};
 
@@ -57,55 +58,116 @@ pub fn default_path() -> Option<PathBuf> {
     Some(dir.join("prismapsis").join("settings.toml"))
 }
 
-/// The settings in `path`, or `None` if it can't be read. A file with
-/// mistakes is ignored rather than stopping the game.
+/// The key the browser keeps settings under in its local storage.
+#[cfg(target_arch = "wasm32")]
+const STORAGE_KEY: &str = "prismapsis.settings";
+
+/// Where settings are kept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Store {
+    /// A TOML file.
+    File(PathBuf),
+    /// The browser's local storage, holding the same TOML.
+    #[cfg(target_arch = "wasm32")]
+    Browser,
+}
+
+/// Where the game keeps settings: the browser's local storage on the web,
+/// otherwise the file at [`default_path`], if there is one.
 #[must_use]
-pub fn load(path: &Path) -> Option<Saved> {
-    let text = std::fs::read_to_string(path).ok()?;
-    toml::from_str(&text).ok()
+#[cfg(target_arch = "wasm32")]
+pub const fn default_store() -> Option<Store> {
+    Some(Store::Browser)
 }
 
-/// Write `saved` to `path`, making its directory if need be.
-///
-/// # Errors
-///
-/// If the directory or file can't be written.
-pub fn save(path: &Path, saved: Saved) -> Result<(), String> {
-    let text = toml::to_string(&saved).map_err(|e| e.to_string())?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+/// Where the game keeps settings: the browser's local storage on the web,
+/// otherwise the file at [`default_path`], if there is one.
+#[must_use]
+#[cfg(not(target_arch = "wasm32"))]
+pub fn default_store() -> Option<Store> {
+    default_path().map(Store::File)
+}
+
+impl Store {
+    /// The settings kept here, or `None` if there are none or they can't
+    /// be read. Settings with mistakes are ignored rather than stopping the
+    /// game.
+    #[must_use]
+    pub fn load(&self) -> Option<Saved> {
+        toml::from_str(&self.read()?).ok()
     }
-    std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+
+    /// Keep `saved` here.
+    ///
+    /// # Errors
+    ///
+    /// If they can't be written.
+    pub fn save(&self, saved: Saved) -> Result<(), String> {
+        let text = toml::to_string(&saved).map_err(|e| e.to_string())?;
+        self.write(&text)
+    }
+
+    /// The text kept here, if any.
+    fn read(&self) -> Option<String> {
+        match self {
+            Self::File(path) => std::fs::read_to_string(path).ok(),
+            #[cfg(target_arch = "wasm32")]
+            Self::Browser => local_storage()?.get_item(STORAGE_KEY).ok()?,
+        }
+    }
+
+    /// Keep `text` here, making a file's directory if need be.
+    fn write(&self, text: &str) -> Result<(), String> {
+        match self {
+            Self::File(path) => {
+                if let Some(dir) = path.parent() {
+                    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                }
+                std::fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
+            }
+            #[cfg(target_arch = "wasm32")]
+            Self::Browser => local_storage()
+                .ok_or("no local storage")?
+                .set_item(STORAGE_KEY, text)
+                .map_err(|e| format!("local storage: {e:?}")),
+        }
+    }
 }
 
-/// The settings file, if settings are kept; tests and tools run without.
+/// The browser's local storage, if the page may use it.
+#[cfg(target_arch = "wasm32")]
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok()?
+}
+
+/// Where settings are kept, if they are; tests and tools run without.
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
-pub struct SettingsFile(pub Option<PathBuf>);
+pub struct SettingsStore(pub Option<Store>);
 
 /// Loads the settings at start and saves them on leaving the settings
 /// screen.
 #[derive(Debug, Default)]
 pub struct SettingsPlugin {
-    pub path: Option<PathBuf>,
+    pub store: Option<Store>,
 }
 
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(SettingsFile(self.path.clone()))
+        app.insert_resource(SettingsStore(self.store.clone()))
             .add_systems(Startup, load_settings)
             .add_systems(OnExit(Screen::Settings), save_settings);
     }
 }
 
-fn load_settings(file: Res<SettingsFile>, mut settings: ResMut<SoundSettings>) {
-    if let Some(saved) = file.0.as_deref().and_then(load) {
+fn load_settings(store: Res<SettingsStore>, mut settings: ResMut<SoundSettings>) {
+    if let Some(saved) = store.0.as_ref().and_then(Store::load) {
         saved.apply(&mut settings);
     }
 }
 
-fn save_settings(file: Res<SettingsFile>, settings: Res<SoundSettings>) {
-    if let Some(path) = &file.0
-        && let Err(problem) = save(path, Saved::from(&*settings))
+fn save_settings(store: Res<SettingsStore>, settings: Res<SoundSettings>) {
+    if let Some(store) = &store.0
+        && let Err(problem) = store.save(Saved::from(&*settings))
     {
         warn!("couldn't save settings: {problem}");
     }
@@ -124,28 +186,30 @@ mod tests {
     #[test]
     fn settings_save_and_load_back() {
         let path = temp_file("round-trip");
+        let store = Store::File(path.clone());
         let saved = Saved {
             master: 0.5,
             music: 0.2,
             effects: 0.9,
         };
-        save(&path, saved).unwrap();
-        assert_eq!(load(&path), Some(saved));
+        store.save(saved).unwrap();
+        assert_eq!(store.load(), Some(saved));
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]
     fn missing_values_take_defaults_and_bad_files_are_ignored() {
         let path = temp_file("partial");
+        let store = Store::File(path.clone());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "music = 0.1\n").unwrap();
-        let loaded = load(&path).unwrap();
+        let loaded = store.load().unwrap();
         assert!((loaded.music - 0.1).abs() < f32::EPSILON);
         assert!((loaded.master - Saved::default().master).abs() < f32::EPSILON);
         std::fs::write(&path, "music = \"loud\"\n").unwrap();
-        assert_eq!(load(&path), None);
+        assert_eq!(store.load(), None);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
-        assert_eq!(load(&path), None);
+        assert_eq!(store.load(), None);
     }
 
     #[test]
@@ -166,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_settings_file_lives_in_the_config_directory() {
-        if let Some(path) = default_path() {
+        if let Some(Store::File(path)) = default_store() {
             assert!(path.ends_with("prismapsis/settings.toml"));
         }
     }
@@ -175,20 +239,19 @@ mod tests {
     fn settings_load_at_start_and_save_on_leaving_the_settings_screen() {
         use bevy::state::app::StatesPlugin;
         let path = temp_file("plugin");
-        save(
-            &path,
-            Saved {
+        let store = Store::File(path.clone());
+        store
+            .save(Saved {
                 master: 0.3,
                 ..Saved::default()
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .init_resource::<SoundSettings>()
             .insert_state(Screen::Settings)
             .add_plugins(SettingsPlugin {
-                path: Some(path.clone()),
+                store: Some(store.clone()),
             });
         app.update();
         assert!((app.world().resource::<SoundSettings>().master - 0.3).abs() < f32::EPSILON);
@@ -198,7 +261,7 @@ mod tests {
             .resource_mut::<NextState<Screen>>()
             .set(Screen::Title);
         app.update();
-        assert!((load(&path).unwrap().music - 0.25).abs() < f32::EPSILON);
+        assert!((store.load().unwrap().music - 0.25).abs() < f32::EPSILON);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }

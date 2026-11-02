@@ -38,10 +38,12 @@ workflow builds Linux, Windows and macOS binaries and attaches them to it. It
 also builds the web version, attaches it as a zip and publishes it to GitHub
 Pages, where it can be played in a browser.
 
-To check that every platform builds without releasing, run the `Release`
-workflow manually from the Actions tab; the builds are saved as workflow
-artifacts. Tick "Publish the web build to GitHub Pages" on a manual run
-from `main` to update the playable site without a release.
+To check the builds without releasing, run the `Release` workflow manually
+from the Actions tab; the builds are saved as workflow artifacts. A manual
+run builds the web version, and the desktop versions only when "Build the
+Linux, Windows and macOS versions too" is ticked. Tick "Publish the web
+build to GitHub Pages" on a manual run from `main` to update the playable
+site without a release; leave the desktop box unticked to publish quickly.
 
 ## Web build
 

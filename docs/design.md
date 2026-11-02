@@ -433,8 +433,8 @@ output is committed; the game only ever loads level files.
   home screen plays without the browser's bars (iPhone has no Fullscreen
   API).
 - **In a browser** the title has no Quit, the clock comes from `web-time`,
-  and settings aren't saved yet, as there's no configuration directory;
-  the browser's local storage could keep them later.
+  and, with no configuration directory, settings are kept as the same TOML
+  in the browser's local storage, under `prismapsis.settings`.
 - `just web` builds it into `dist/web`; `just web-serve` serves it locally.
 
 ## Touch controls
@@ -450,8 +450,8 @@ output is committed; the game only ever loads level files.
   thumb can hold fire while the other taps spin, and a finger sliding
   onto a button presses it.
 - **Hold** holds the prism while pressed, and a tap locks it held, so
-  fire is free for the same thumb; it reads "Held" and stays lit until
-  tapped again. A finger that starts on hold keeps the prism held
+  fire is free for the same thumb; its padlock closes and it stays lit
+  until tapped again. A finger that starts on hold keeps the prism held
   wherever it slides, sliding it up turns the prism anticlockwise and
   down clockwise, as Q and E do, and lifting it leaves the prism locked.
   The lock lets go when play ends or the buttons hide.
@@ -670,6 +670,7 @@ output is committed; the game only ever loads level files.
 | 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
 | 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
+| 7e | Light and finish | Generated art for phantoms, beams and the exit; bloom on bright light; the HUD's glass tubes, hero lives and power-up bubbles, and the Exo 2 font; crystal lamp checkpoints, spark bursts and colour droplets with arrival ticks; parallax backdrops per theme. |
 | 8-1 | Screens and score | Title, game over and campaign-finished screens with menus that stop the clock; continuing after a game over; points from game events, shown in play; the best score this session. |
 | 8-2 | Music and audio | Four-stem music in Lydian that fills out as colours are restored; a settings screen for master, music and effects volumes, saved between runs. |
 | 8b | Web build | Build for the browser (`wasm32`) and publish it to GitHub Pages with each release, so the game can be played from the project's page. WebGL2 first, as every current browser has it, including Safari on iOS; WebGPU where it pays later. A clock that works in the browser, the canvas fitted to the page, audio started by the first tap or key, no Quit in a browser tab, `wasm-opt` for size, `just web` to build and serve it locally, and a release job that deploys to Pages and attaches the build. |
