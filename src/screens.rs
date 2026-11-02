@@ -1,10 +1,11 @@
-//! The game's screens: the title, play, game over and the campaign's end.
+//! The game's screens: the title, its settings, play, game over and the
+//! campaign's end.
 //!
 //! Menu screens show over the level with the game clock stopped, as pausing
 //! does, so the level waits greyed out behind them. Choosing to play from
-//! the title starts a new game from the campaign's first level; continuing
-//! after a game over plays the same level again with the score back at
-//! nothing.
+//! the title starts a game from the campaign's first level; going back to
+//! the title from a game starts a new one. Continuing after a game over
+//! plays the same level again with the score back at nothing.
 
 use bevy::prelude::*;
 
@@ -12,6 +13,7 @@ use crate::enemy::{KeepAbilities, ResetRoom, reset_room};
 use crate::events::GameEvent;
 use crate::level::{Campaign, CurrentLevel};
 use crate::score::{Score, grouped};
+use crate::sound::{Auditions, SoundId, SoundSettings};
 
 /// Which screen is showing.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -23,6 +25,8 @@ pub enum Screen {
     GameOver,
     /// The campaign's last level is finished.
     Finished,
+    /// The volumes, from the title.
+    Settings,
 }
 
 /// Run condition: true while playing, and always when the game has no
@@ -39,21 +43,66 @@ pub enum Choice {
     Play,
     /// Play the level again after a game over, scoring from nothing.
     Continue,
-    /// Go back to the title.
+    /// Go back to the title, starting a new game.
     Title,
+    Settings,
+    /// A volume, changed with left and right.
+    Volume(Channel),
+    /// Back to the title from the settings.
+    Back,
     Quit,
 }
 
-impl Choice {
-    const fn label(self) -> &'static str {
+/// A volume the player sets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Channel {
+    Master,
+    Music,
+    Effects,
+}
+
+impl Channel {
+    const fn name(self) -> &'static str {
         match self {
-            Self::Play => "Play",
-            Self::Continue => "Continue",
-            Self::Title => "Back to the title",
-            Self::Quit => "Quit",
+            Self::Master => "Volume",
+            Self::Music => "Music",
+            Self::Effects => "Effects",
+        }
+    }
+
+    const fn level(self, settings: &mut SoundSettings) -> &mut f32 {
+        match self {
+            Self::Master => &mut settings.master,
+            Self::Music => &mut settings.music,
+            Self::Effects => &mut settings.effects,
         }
     }
 }
+
+/// How much left or right changes a volume.
+pub const VOLUME_STEP: f32 = 0.1;
+
+impl Choice {
+    fn label(self, settings: Option<&SoundSettings>) -> String {
+        match self {
+            Self::Play => "Play".to_owned(),
+            Self::Continue => "Continue".to_owned(),
+            Self::Title => "Back to the title".to_owned(),
+            Self::Settings => "Settings".to_owned(),
+            Self::Volume(channel) => {
+                let mut settings = settings.cloned().unwrap_or_default();
+                let percent = (*channel.level(&mut settings) * 100.0).round();
+                format!("{} {percent}%", channel.name())
+            }
+            Self::Back => "Back".to_owned(),
+            Self::Quit => "Quit".to_owned(),
+        }
+    }
+}
+
+/// Set on going back to the title from a game, so it starts a new one.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct NewGame(pub bool);
 
 /// A screen's menu: its choices and which is selected.
 #[derive(Component, Debug, Clone, PartialEq)]
@@ -86,7 +135,12 @@ pub struct ScreensPlugin {
 impl Plugin for ScreensPlugin {
     fn build(&self, app: &mut App) {
         app.insert_state(self.start)
-            .add_systems(OnEnter(Screen::Title), (new_game, spawn_title).chain())
+            .init_resource::<NewGame>()
+            .add_systems(
+                OnEnter(Screen::Title),
+                (new_game.run_if(|new: Res<NewGame>| new.0), spawn_title).chain(),
+            )
+            .add_systems(OnEnter(Screen::Settings), spawn_settings)
             .add_systems(OnEnter(Screen::Playing), resume)
             .add_systems(OnEnter(Screen::GameOver), (freeze, spawn_game_over))
             .add_systems(OnEnter(Screen::Finished), (freeze, spawn_finished))
@@ -113,6 +167,7 @@ fn resume(mut time: ResMut<Time<Virtual>>) {
 /// Back to the campaign's first level, with the room reset, no abilities
 /// and no points. The clock runs until the reset is done.
 fn new_game(
+    mut new: ResMut<NewGame>,
     mut campaign: ResMut<Campaign>,
     mut level: ResMut<CurrentLevel>,
     mut reset: ResMut<ResetRoom>,
@@ -120,6 +175,7 @@ fn new_game(
     mut score: ResMut<Score>,
     mut time: ResMut<Time<Virtual>>,
 ) {
+    new.0 = false;
     campaign.restart();
     level.set_if_neq(CurrentLevel(campaign.level().level.clone()));
     reset.0 = true;
@@ -221,8 +277,25 @@ fn spawn_title(mut commands: Commands, score: Res<Score>, time: Res<Time<Real>>)
         Screen::Title,
         "Prismapsis",
         &lines,
-        vec![Choice::Play, Choice::Quit],
+        vec![Choice::Play, Choice::Settings, Choice::Quit],
         "Left and right spin, space fires\nShift holds the prism, P pauses",
+        time.elapsed_secs_f64(),
+    );
+}
+
+fn spawn_settings(mut commands: Commands, time: Res<Time<Real>>) {
+    spawn_screen(
+        &mut commands,
+        Screen::Settings,
+        "Settings",
+        &[],
+        vec![
+            Choice::Volume(Channel::Master),
+            Choice::Volume(Channel::Music),
+            Choice::Volume(Channel::Effects),
+            Choice::Back,
+        ],
+        "Left and right change a volume",
         time.elapsed_secs_f64(),
     );
 }
@@ -258,14 +331,16 @@ fn spawn_finished(mut commands: Commands, score: Res<Score>, time: Res<Time<Real
     );
 }
 
-/// Up and down move through the menu; enter, space or the gamepad's south
-/// or start button chooses.
+/// Up and down move through the menu; left and right change a volume,
+/// playing a sound to hear it by; enter, space or the gamepad's south or
+/// start button chooses.
 fn choose(
     keys: Res<ButtonInput<KeyCode>>,
     gamepads: Query<&Gamepad>,
     time: Res<Time<Real>>,
     mut menus: Query<&mut Menu>,
-    mut score: ResMut<Score>,
+    (mut score, mut new): (ResMut<Score>, ResMut<NewGame>),
+    (mut settings, mut auditions): (Option<ResMut<SoundSettings>>, Option<ResMut<Auditions>>),
     mut next: ResMut<NextState<Screen>>,
     mut exit: MessageWriter<AppExit>,
 ) {
@@ -288,6 +363,23 @@ fn choose(
     {
         menu.selected = (menu.selected + 1) % count;
     }
+    let left = keys.any_just_pressed([KeyCode::ArrowLeft, KeyCode::KeyA])
+        || pad(&[GamepadButton::DPadLeft]);
+    let right = keys.any_just_pressed([KeyCode::ArrowRight, KeyCode::KeyD])
+        || pad(&[GamepadButton::DPadRight]);
+    if let (Choice::Volume(channel), Some(settings)) = (menu.choices[menu.selected], &mut settings)
+        && left != right
+    {
+        let step = if right { VOLUME_STEP } else { -VOLUME_STEP };
+        let level = channel.level(settings);
+        // Rounded to whole steps, so repeated changes don't drift.
+        *level = ((*level + step).clamp(0.0, 1.0) * 10.0).round() / 10.0;
+        if channel != Channel::Music
+            && let Some(auditions) = &mut auditions
+        {
+            auditions.0.push(SoundId::Checkpoint);
+        }
+    }
     let confirm = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter, KeyCode::Space])
         || pad(&[GamepadButton::South, GamepadButton::Start]);
     if !confirm {
@@ -299,7 +391,13 @@ fn choose(
             score.restart();
             next.set(Screen::Playing);
         }
-        Choice::Title => next.set(Screen::Title),
+        Choice::Title => {
+            new.0 = true;
+            next.set(Screen::Title);
+        }
+        Choice::Settings => next.set(Screen::Settings),
+        Choice::Back => next.set(Screen::Title),
+        Choice::Volume(_) => {}
         Choice::Quit => {
             exit.write(AppExit::Success);
         }
@@ -308,7 +406,8 @@ fn choose(
 
 /// Show each choice, the selected one brighter and marked.
 fn highlight(
-    menus: Query<&Menu, Changed<Menu>>,
+    menus: Query<&Menu>,
+    settings: Option<Res<SoundSettings>>,
     mut lines: Query<(&MenuLine, &mut Text, &mut TextColor)>,
 ) {
     let Ok(menu) = menus.single() else {
@@ -319,11 +418,15 @@ fn highlight(
             continue;
         };
         let selected = line.0 == menu.selected;
-        text.0 = if selected {
-            format!("- {} -", choice.label())
+        let label = choice.label(settings.as_deref());
+        let wanted = if selected {
+            format!("- {label} -")
         } else {
-            choice.label().to_owned()
+            label
         };
+        if text.0 != wanted {
+            text.0 = wanted;
+        }
         colour.0 = if selected {
             SELECTED_COLOUR
         } else {
@@ -430,7 +533,7 @@ mod tests {
         let still = hero(&mut app);
         run(&mut app, 20);
         assert_eq!(hero(&mut app), still);
-        assert_eq!(lines(&mut app), ["- Play -", "Quit"]);
+        assert_eq!(lines(&mut app), ["- Play -", "Settings", "Quit"]);
 
         // P doesn't pause from a menu.
         tap(&mut app, KeyCode::KeyP);
@@ -455,14 +558,63 @@ mod tests {
         let mut app = app(Screen::Title);
         wait_for_menu(&mut app);
         tap(&mut app, KeyCode::ArrowDown);
-        assert_eq!(lines(&mut app), ["Play", "- Quit -"]);
+        assert_eq!(lines(&mut app), ["Play", "- Settings -", "Quit"]);
+        tap(&mut app, KeyCode::ArrowDown);
         tap(&mut app, KeyCode::ArrowDown);
         assert_eq!(menu(&mut app).unwrap().selected, 0);
         tap(&mut app, KeyCode::KeyW);
-        assert_eq!(menu(&mut app).unwrap().selected, 1);
+        assert_eq!(menu(&mut app).unwrap().selected, 2);
         tap(&mut app, KeyCode::Space);
         let exits = app.world().resource::<Messages<AppExit>>();
         assert!(!exits.is_empty(), "quit");
+    }
+
+    #[test]
+    fn the_settings_change_volumes_in_steps_and_go_back_to_the_title() {
+        let mut app = app(Screen::Title);
+        app.init_resource::<SoundSettings>()
+            .init_resource::<Auditions>();
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Settings);
+        wait_for_menu(&mut app);
+        assert_eq!(
+            lines(&mut app),
+            ["- Volume 80% -", "Music 60%", "Effects 100%", "Back"]
+        );
+
+        // Music down twice, then effects up past the top.
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::ArrowLeft);
+        tap(&mut app, KeyCode::KeyA);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::ArrowRight);
+        let settings = app.world().resource::<SoundSettings>().clone();
+        assert!((settings.music - 0.4).abs() < 1e-6, "{}", settings.music);
+        assert!((settings.effects - 1.0).abs() < f32::EPSILON);
+        assert_eq!(
+            lines(&mut app),
+            ["Volume 80%", "Music 40%", "- Effects 100% -", "Back"]
+        );
+        // Changing the effects plays one to hear it by; the music can be
+        // heard already.
+        assert_eq!(app.world().resource::<Auditions>().0, [SoundId::Checkpoint]);
+
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Title);
+        assert!(!app.world().resource::<NewGame>().0, "no new game");
+    }
+
+    #[test]
+    fn volumes_need_settings_to_change() {
+        let mut app = app(Screen::Settings);
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowRight);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Settings);
+        assert_eq!(lines(&mut app)[0], "- Volume 80% -");
     }
 
     #[test]

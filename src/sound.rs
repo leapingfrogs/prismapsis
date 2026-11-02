@@ -14,6 +14,7 @@ use crate::beam::{BeamEnergy, BeamTuning};
 use crate::enemy::EnemyKind;
 use crate::events::GameEvent;
 use crate::light::{Hue, Primary};
+use crate::music::MusicStem;
 use crate::powerup::{Abilities, PowerUp};
 use crate::prism::PrismFrozen;
 use crate::render::{BeamView, MainCamera};
@@ -145,14 +146,16 @@ pub const fn primary_degree(primary: Primary) -> i32 {
     }
 }
 
-/// Volume levels, adjusted from the dev tuning panel.
+/// Volume levels. Master, music and effects are the player's settings;
+/// the beam's level within the effects is tuned from the dev panel.
 #[derive(Resource, Debug, Clone, PartialEq, Reflect)]
 #[reflect(Resource)]
 pub struct SoundSettings {
     pub master: f32,
-    /// One-shot effects.
+    pub music: f32,
+    /// Sound effects, the beam's included.
     pub effects: f32,
-    /// The looping beam hum and chord.
+    /// The looping beam hum and chord, relative to the other effects.
     pub beam: f32,
 }
 
@@ -160,6 +163,7 @@ impl Default for SoundSettings {
     fn default() -> Self {
         Self {
             master: 0.8,
+            music: 0.6,
             effects: 1.0,
             beam: 0.6,
         }
@@ -400,8 +404,9 @@ fn load_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
     commands.insert_resource(SoundBank(bank));
 }
 
-/// Hold every sound while the game is paused, and carry on when it resumes.
-fn pause_audio(time: Res<Time<Virtual>>, sinks: Query<&AudioSink>) {
+/// Hold every sound effect while the game is paused, and carry on when it
+/// resumes. The music plays on.
+fn pause_audio(time: Res<Time<Virtual>>, sinks: Query<&AudioSink, Without<MusicStem>>) {
     let paused = time.is_paused();
     for sink in &sinks {
         if sink.is_paused() != paused {
@@ -596,7 +601,7 @@ fn drive_beam_loops(
     mut chords: Query<&mut AudioSink, (With<BeamChord>, Without<BeamHum>)>,
 ) {
     let dt = time.delta_secs();
-    let level = settings.beam * settings.master;
+    let level = settings.beam * settings.effects * settings.master;
     let split = view.is_some_and(|v| v.split);
     let speed = hum_speed(
         energy.current,

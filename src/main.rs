@@ -30,7 +30,10 @@ fn main() -> AppExit {
                 primary_window: Some(primary_window(fullscreen)),
                 ..default()
             }),
-            GamePlugin { level },
+            GamePlugin {
+                level,
+                settings: prismapsis::settings::default_path(),
+            },
         ))
         .run()
 }
