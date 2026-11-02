@@ -541,7 +541,19 @@ output is committed; the game only ever loads level files.
   - **Pickups** are dark glass bubbles in a lit rim, tinted by the
     power-up, round its white glyph. The **prism** is a glass triangle with
     a bright rim and lines to its corners.
-  - Bursts, checkpoints and beams are still simple shapes.
+  - Bursts and checkpoints are still simple shapes.
+- **Phantom platforms** have a tileset of their own, drawn in white and
+  greys one quad per cell like features and tinted with their hue, which
+  they keep whatever has been restored. While waiting they are ghosts:
+  faint glass with a slow shimmer and a dashed rim of light round the
+  outside. Once solid they are crystal blocks, bevelled and lit from the
+  top left, with faint seams between cells and a gleam on the corner.
+- **Beams** are a soft glow stretched along each piece, from a painted
+  profile, with a whitened core down the middle.
+- **The exit** is a doorway: a pale frame with an arched opening, sliced
+  to fit any size, and light filling the opening that is brightest at the
+  floor with thin rays rising. Both stay dim until white is restored, then
+  the frame shines and the light pulses.
 
 ## Sound
 

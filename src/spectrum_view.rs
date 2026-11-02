@@ -5,6 +5,9 @@
 
 use bevy::prelude::*;
 
+use crate::art::figures::GlowArt;
+use crate::art::glow;
+use crate::art::tiles::PhantomTiles;
 use crate::level::{CurrentLevel, Solid};
 use crate::light::{ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Spectrum};
 use crate::screens::{Screen, in_play};
@@ -81,133 +84,124 @@ fn advance_wash(time: Res<Time>, spectrum: Res<Spectrum>, mut wash: ResMut<Wash>
     }
 }
 
-/// Outline thickness of phantom platforms and the exit frame.
-const OUTLINE: f32 = 4.0;
-
-/// Four thin rectangles tracing the edge of a `size` box centred on the
-/// parent, as (offset, size) pairs.
-fn outline_parts(size: Vec2) -> [(Vec2, Vec2); 4] {
-    let half = size / 2.0;
-    [
-        (Vec2::new(0.0, half.y), Vec2::new(size.x, OUTLINE)),
-        (Vec2::new(0.0, -half.y), Vec2::new(size.x, OUTLINE)),
-        (Vec2::new(-half.x, 0.0), Vec2::new(OUTLINE, size.y)),
-        (Vec2::new(half.x, 0.0), Vec2::new(OUTLINE, size.y)),
-    ]
+/// Which art a phantom's mesh shows: waiting, or solid.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PhantomLook {
+    pub solid: bool,
 }
 
-fn spawn_outline(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    parent: Entity,
-    size: Vec2,
-    material: &Handle<ColorMaterial>,
-) {
-    for (offset, part) in outline_parts(size) {
-        let child = commands
-            .spawn((
-                Mesh2d(meshes.add(Rectangle::new(part.x, part.y))),
-                MeshMaterial2d(material.clone()),
-                Transform::from_translation(offset.extend(0.05)),
-            ))
-            .id();
-        commands.entity(parent).add_child(child);
-    }
+/// A phantom's mesh: ghost tiles while it waits, crystal once solid,
+/// tinted with its hue.
+fn phantom_mesh(phantom: &Phantom, tile: f32, solid: bool) -> Mesh {
+    let [r, g, b, _] = hue_colour(phantom.hue).to_linear().to_f32_array();
+    crate::art::phantoms::mesh(&phantom.aabb, tile, solid, [r, g, b])
 }
 
-/// A phantom's fill when it is only an outline.
-const PHANTOM_FILL_ALPHA: f32 = 0.1;
-
-/// Phantoms are a coloured outline with a faint fill, which turns solid
-/// when their hue is restored.
+/// Phantoms are drawn from the phantom tileset, one mesh each.
 fn draw_phantoms(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    phantoms: Query<(Entity, &Phantom), Added<Phantom>>,
+    tiles: Option<Res<PhantomTiles>>,
+    level: Res<CurrentLevel>,
+    phantoms: Query<(Entity, &Phantom, Has<Solid>), Added<Phantom>>,
 ) {
-    for (entity, phantom) in &phantoms {
-        let size = phantom.aabb.size();
-        let colour = hue_colour(phantom.hue);
+    let Some(tiles) = tiles else { return };
+    for (entity, phantom, solid) in &phantoms {
         commands.entity(entity).insert((
-            Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(materials.add(colour.with_alpha(PHANTOM_FILL_ALPHA))),
-            Transform::from_translation(phantom.aabb.center().extend(0.2)),
+            Mesh2d(meshes.add(phantom_mesh(phantom, level.0.tile, solid))),
+            MeshMaterial2d(tiles.0.clone()),
+            Transform::from_xyz(0.0, 0.0, 0.2),
+            PhantomLook { solid },
         ));
-        let outline = materials.add(colour.with_alpha(0.7));
-        spawn_outline(&mut commands, &mut meshes, entity, size, &outline);
     }
 }
 
+/// Swap a phantom's art when it turns solid, or back.
 fn show_phantoms(
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    phantoms: Query<(&Phantom, Has<Solid>, &MeshMaterial2d<ColorMaterial>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    level: Res<CurrentLevel>,
+    mut phantoms: Query<(&Phantom, Has<Solid>, &mut PhantomLook, &mut Mesh2d)>,
 ) {
-    for (phantom, solid, material) in &phantoms {
-        let alpha = if solid { 1.0 } else { PHANTOM_FILL_ALPHA };
-        let colour = hue_colour(phantom.hue).with_alpha(alpha);
-        // Only touch the asset on a change, so it isn't re-uploaded each frame.
-        if materials
-            .get(&material.0)
-            .is_some_and(|m| m.color != colour)
-            && let Some(mut material) = materials.get_mut(&material.0)
-        {
-            material.color = colour;
+    for (phantom, solid, mut look, mut mesh) in &mut phantoms {
+        if look.solid == solid {
+            continue;
         }
+        look.solid = solid;
+        meshes.remove(&mesh.0);
+        mesh.0 = meshes.add(phantom_mesh(phantom, level.0.tile, solid));
     }
 }
 
-const EXIT_CLOSED: Color = Color::srgb(0.25, 0.25, 0.3);
+/// The exit's frame tint while closed: pale stone in the dark.
+const EXIT_CLOSED: Color = Color::srgb(0.55, 0.56, 0.62);
 
-/// Materials for the exit's frame and inner glow.
+/// How strongly the doorway glows while closed.
+const EXIT_CLOSED_GLOW: f32 = 0.08;
+
+/// The light filling an exit's doorway.
 #[derive(Component, Debug)]
-struct ExitMaterials {
-    frame: Handle<ColorMaterial>,
-    glow: Handle<ColorMaterial>,
-}
+struct ExitLight;
 
+/// The frame's art is twice the world's scale, so its corners are drawn
+/// at half size.
+const FRAME_SCALE: f32 = 0.5;
+
+/// The exit is a doorway: a frame sliced to fit its size, with light
+/// behind it filling the opening.
 fn draw_exit(
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    art: Option<Res<GlowArt>>,
     gates: Query<(Entity, &ExitGate), Added<ExitGate>>,
 ) {
+    let art = art.map(|a| a.clone()).unwrap_or_default();
     for (entity, gate) in &gates {
         let size = gate.0.size();
-        let frame = materials.add(EXIT_CLOSED);
-        let glow = materials.add(EXIT_CLOSED.with_alpha(0.15));
+        let thickness = glow::FRAME_THICKNESS_PX * FRAME_SCALE;
+        let opening = Vec2::new(size.x - 2.0 * thickness, size.y - thickness);
         commands.entity(entity).insert((
-            Mesh2d(meshes.add(Rectangle::new(size.x, size.y))),
-            MeshMaterial2d(glow.clone()),
-            Transform::from_translation(gate.0.center().extend(0.3)),
-            ExitMaterials {
-                frame: frame.clone(),
-                glow,
+            Sprite {
+                image: art.exit_frame.clone(),
+                color: EXIT_CLOSED,
+                custom_size: Some(size),
+                image_mode: SpriteImageMode::Sliced(TextureSlicer {
+                    border: BorderRect::all(glow::FRAME_BORDER_PX),
+                    max_corner_scale: FRAME_SCALE,
+                    ..default()
+                }),
+                ..default()
             },
+            Transform::from_translation(gate.0.center().extend(0.3)),
+            children![(
+                ExitLight,
+                Sprite {
+                    image: art.exit_light.clone(),
+                    color: Color::WHITE.with_alpha(EXIT_CLOSED_GLOW),
+                    custom_size: Some(opening),
+                    ..default()
+                },
+                Transform::from_xyz(0.0, -thickness / 2.0, -0.01),
+            )],
         ));
-        spawn_outline(&mut commands, &mut meshes, entity, size, &frame);
     }
 }
 
-/// Grey while closed; once white is restored, the frame shines and the
-/// doorway pulses.
+/// Dim while closed; once white is restored, the frame shines and the
+/// doorway's light pulses.
 fn animate_exit(
     time: Res<Time>,
     wash: Res<Wash>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
-    gates: Query<&ExitMaterials>,
+    mut frames: Query<&mut Sprite, (With<ExitGate>, Without<ExitLight>)>,
+    mut lights: Query<&mut Sprite, With<ExitLight>>,
 ) {
     let open = wash.of(Hue::White);
     let pulse = 0.5 + 0.5 * (time.elapsed_secs() * 3.0).sin();
     let white = hue_colour(Hue::White);
-    for gate in &gates {
-        if let Some(mut frame) = materials.get_mut(&gate.frame) {
-            frame.color = EXIT_CLOSED.mix(&white, open);
-        }
-        if let Some(mut glow) = materials.get_mut(&gate.glow) {
-            let alpha = 0.15 + open * (0.35 + 0.3 * pulse);
-            glow.color = EXIT_CLOSED.mix(&white, open).with_alpha(alpha);
-        }
+    for mut frame in &mut frames {
+        frame.color = EXIT_CLOSED.mix(&white, open);
+    }
+    for mut light in &mut lights {
+        let alpha = EXIT_CLOSED_GLOW + open * (0.55 + 0.35 * pulse);
+        light.color = white.with_alpha(alpha);
     }
 }
 
@@ -366,28 +360,18 @@ mod tests {
         }
     }
 
-    fn colour_of<F: bevy::ecs::query::QueryFilter>(app: &mut App) -> Vec<Color> {
-        let handles: Vec<_> = {
-            let world = app.world_mut();
-            world
-                .query_filtered::<&MeshMaterial2d<ColorMaterial>, F>()
-                .iter(world)
-                .map(|m| m.0.clone())
-                .collect()
-        };
-        let materials = app.world().resource::<Assets<ColorMaterial>>();
-        handles
-            .iter()
-            .filter_map(|h| materials.get(h).map(|m| m.color))
-            .collect()
-    }
-
-    /// How far each tileset's art has been told colour is restored.
+    /// How far each theme tileset's art has been told colour is restored.
     fn washes(app: &App) -> Vec<Vec4> {
         let materials = app
             .world()
             .resource::<Assets<crate::art::tiles::WorldMaterial>>();
-        materials.iter().map(|(_, m)| m.wash).collect()
+        let tilesets = app.world().resource::<crate::art::tiles::Tilesets>();
+        tilesets
+            .0
+            .iter()
+            .flatten()
+            .filter_map(|handle| materials.get(handle).map(|m| m.wash))
+            .collect()
     }
 
     #[test]
@@ -416,25 +400,25 @@ mod tests {
     }
 
     #[test]
-    fn phantoms_fill_in_when_solid() {
+    fn phantoms_turn_to_crystal_when_solid() {
         let mut app = app();
         run(&mut app, 2);
-        let alphas = |app: &mut App| -> Vec<f32> {
-            colour_of::<With<Phantom>>(app)
-                .iter()
-                .map(Alpha::alpha)
+        let solid = |app: &mut App| -> Vec<bool> {
+            let world = app.world_mut();
+            world
+                .query::<&PhantomLook>()
+                .iter(world)
+                .map(|look| look.solid)
                 .collect()
         };
-        assert!(alphas(&mut app).iter().all(|&a| a < 0.5));
+        let looks = solid(&mut app);
+        assert!(!looks.is_empty() && looks.iter().all(|&s| !s));
         app.world_mut()
             .resource_mut::<Spectrum>()
             .restore(Primary::Green, 10.0);
         run(&mut app, 3);
-        let filled = alphas(&mut app)
-            .iter()
-            .filter(|&&a| (a - 1.0).abs() < f32::EPSILON)
-            .count();
-        assert_eq!(filled, 1, "only the green phantom fills");
+        let filled = solid(&mut app).iter().filter(|&&s| s).count();
+        assert_eq!(filled, 1, "only the green phantom turns solid");
     }
 
     #[test]
@@ -475,18 +459,10 @@ mod tests {
         let mut app = app();
         run(&mut app, 2);
         let frame = |app: &mut App| {
-            let handle = {
-                let world = app.world_mut();
-                world
-                    .query::<&ExitMaterials>()
-                    .single(world)
-                    .unwrap()
-                    .frame
-                    .clone()
-            };
-            app.world()
-                .resource::<Assets<ColorMaterial>>()
-                .get(&handle)
+            let world = app.world_mut();
+            world
+                .query_filtered::<&Sprite, With<ExitGate>>()
+                .single(world)
                 .unwrap()
                 .color
         };

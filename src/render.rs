@@ -309,6 +309,15 @@ fn squash_hero(
 const WHITE_BEAM_WIDTH: f32 = 6.0;
 const SPLIT_BEAM_WIDTH: f32 = 4.0;
 
+/// How far a beam's glow spreads, in beam widths across.
+const BEAM_GLOW: f32 = 4.0;
+
+/// How wide a beam's hot core is, as a fraction of its glow.
+const BEAM_CORE: f32 = 0.4;
+
+/// How far a beam's core is whitened, so it burns brighter than its glow.
+const BEAM_CORE_WHITE: f32 = 0.6;
+
 /// Display colour of a beam.
 #[must_use]
 pub const fn beam_colour(colour: BeamColour) -> Color {
@@ -339,38 +348,46 @@ pub struct BeamVisual(pub usize);
 /// off mirrors up to `MAX_REFLECTIONS` times.
 pub const MAX_BEAM_PIECES: usize = 2 * 3 * 4 * (1 + MAX_REFLECTIONS);
 
-/// One material per beam colour, shared by the pieces.
+/// A beam piece's hot core, drawn over its glow.
+#[derive(Component, Debug)]
+pub struct BeamCore;
+
+/// Materials for each beam colour's glow and core, in `BeamColour::ALL`
+/// order, shared by the pieces.
 #[derive(Resource, Debug)]
 struct BeamMaterials {
-    white: Handle<ColorMaterial>,
-    red: Handle<ColorMaterial>,
-    green: Handle<ColorMaterial>,
-    blue: Handle<ColorMaterial>,
+    glow: [Handle<ColorMaterial>; 4],
+    core: [Handle<ColorMaterial>; 4],
 }
 
 impl BeamMaterials {
-    const fn get(&self, colour: BeamColour) -> &Handle<ColorMaterial> {
-        match colour {
-            BeamColour::White => &self.white,
-            BeamColour::Red => &self.red,
-            BeamColour::Green => &self.green,
-            BeamColour::Blue => &self.blue,
-        }
+    fn index(colour: BeamColour) -> usize {
+        BeamColour::ALL
+            .iter()
+            .position(|&c| c == colour)
+            .unwrap_or(0)
     }
 }
 
 /// Spawn the beam pieces once, hidden; `draw_beam` places, colours and
-/// shows them.
+/// shows them. Each is a soft glow with a hot core down its middle.
 fn spawn_beam_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
+    art: Option<Res<crate::art::figures::GlowArt>>,
 ) {
+    let texture = art.map(|a| a.beam.clone());
+    let mut material = |colour: Color| {
+        materials.add(ColorMaterial {
+            color: colour,
+            texture: texture.clone(),
+            ..default()
+        })
+    };
     let beam_materials = BeamMaterials {
-        white: materials.add(beam_colour(BeamColour::White)),
-        red: materials.add(beam_colour(BeamColour::Red)),
-        green: materials.add(beam_colour(BeamColour::Green)),
-        blue: materials.add(beam_colour(BeamColour::Blue)),
+        glow: BeamColour::ALL.map(|c| material(beam_colour(c))),
+        core: BeamColour::ALL.map(|c| material(beam_colour(c).mix(&Color::WHITE, BEAM_CORE_WHITE))),
     };
     // A unit square, stretched to each piece's length and width.
     let mesh = meshes.add(Rectangle::new(1.0, 1.0));
@@ -379,9 +396,15 @@ fn spawn_beam_visuals(
             Name::new(format!("Beam piece {index}")),
             BeamVisual(index),
             Mesh2d(mesh.clone()),
-            MeshMaterial2d(beam_materials.white.clone()),
+            MeshMaterial2d(beam_materials.glow[0].clone()),
             Transform::default(),
             Visibility::Hidden,
+            children![(
+                BeamCore,
+                Mesh2d(mesh.clone()),
+                MeshMaterial2d(beam_materials.core[0].clone()),
+                Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::new(1.0, BEAM_CORE, 1.0)),
+            )],
         ));
     }
     commands.insert_resource(beam_materials);
@@ -404,12 +427,14 @@ fn draw_beam(
     mut visuals: Query<
         (
             &BeamVisual,
+            &Children,
             &mut Transform,
             &mut Visibility,
             &mut MeshMaterial2d<ColorMaterial>,
         ),
         (Without<Hero>, Without<Prism>),
     >,
+    mut cores: Query<&mut MeshMaterial2d<ColorMaterial>, (With<BeamCore>, Without<BeamVisual>)>,
 ) {
     let Some(beam_materials) = beam_materials else {
         return;
@@ -436,14 +461,19 @@ fn draw_beam(
     if view.split != split {
         view.split = split;
     }
-    for (visual, mut transform, mut visibility, mut material) in &mut visuals {
+    for (visual, children, mut transform, mut visibility, mut material) in &mut visuals {
         let Some(&(start, end, colour)) = trace.segments.get(visual.0) else {
             visibility.set_if_neq(Visibility::Hidden);
             continue;
         };
-        let wanted = beam_materials.get(colour);
-        if material.0 != *wanted {
-            material.0 = wanted.clone();
+        let index = BeamMaterials::index(colour);
+        if material.0 != beam_materials.glow[index] {
+            material.0 = beam_materials.glow[index].clone();
+            for &child in children {
+                if let Ok(mut core) = cores.get_mut(child) {
+                    core.0 = beam_materials.core[index].clone();
+                }
+            }
         }
         let width = if colour == BeamColour::White {
             WHITE_BEAM_WIDTH
@@ -453,7 +483,7 @@ fn draw_beam(
         let span = end - start;
         *transform = Transform::from_translation(start.midpoint(end).extend(3.0))
             .with_rotation(Quat::from_rotation_z(span.to_angle()))
-            .with_scale(Vec3::new(span.length(), width, 1.0));
+            .with_scale(Vec3::new(span.length(), width * BEAM_GLOW, 1.0));
         visibility.set_if_neq(Visibility::Visible);
     }
 }
@@ -1088,7 +1118,7 @@ mod tests {
         // Six white beams, plus three colours if one crosses the prism.
         let shown = visible_beams(&mut app);
         assert!(shown == 6 || shown == 9, "got {shown} beam pieces");
-        let white = app.world().resource::<BeamMaterials>().white.clone();
+        let white = app.world().resource::<BeamMaterials>().glow[0].clone();
         let world = app.world_mut();
         let whites = world
             .query::<(&Visibility, &MeshMaterial2d<ColorMaterial>)>()

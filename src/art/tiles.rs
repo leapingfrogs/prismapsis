@@ -44,6 +44,9 @@ const FEATURES: [&[u8]; 3] = [
     include_bytes!("../../assets/art/observatory/features.png"),
 ];
 
+/// Phantom platforms, painted by `just art` and tinted with their hues.
+const PHANTOMS: &[u8] = include_bytes!("../../assets/art/phantoms.png");
+
 /// Features are drawn just in front of the walls they sit against.
 const FEATURE_DEPTH: f32 = 0.1;
 
@@ -112,6 +115,11 @@ impl Tilesets {
         self.0[theme][2].clone()
     }
 }
+
+/// The material phantoms are drawn with. Phantoms keep their colour, so
+/// it shows every hue in full.
+#[derive(Resource, Debug)]
+pub struct PhantomTiles(pub Handle<WorldMaterial>);
 
 /// A theme picked in the dev panel to preview, in place of the campaign's.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -212,6 +220,11 @@ fn load_tiles(
         })
         .collect();
     commands.insert_resource(Tilesets(themes));
+    let phantoms = load("phantoms", PHANTOMS, super::phantoms::PHANTOM_LAYERS);
+    if let Some(mut material) = materials.get_mut(&phantoms) {
+        material.wash = Vec4::ONE;
+    }
+    commands.insert_resource(PhantomTiles(phantoms));
 }
 
 /// Which cells are filled, and the tint each gives the art.
