@@ -646,6 +646,16 @@ pub fn sounds() -> Vec<Sound> {
         )
         .echo(0.07, 0.3)
         .peak(0.4),
+        // A soft, high tick as each droplet of colour reaches the hero, pitched
+        // at runtime to climb the scale as a stream arrives.
+        Sound::new(
+            "droplet_tick",
+            vec![
+                Tone::new(Sine, c6, 0.12).decay(0.035),
+                Tone::new(Sine, c6 * 1.5, 0.08).decay(0.02).volume(0.25),
+            ],
+        )
+        .peak(0.3),
         // A rising flourish, pitched to the restored primary at runtime.
         Sound::new(
             "colour_restored",

@@ -12,6 +12,7 @@ pub mod art;
 pub mod beam;
 #[cfg(feature = "dev")]
 pub mod dev_tools;
+pub mod droplets;
 pub mod enemy;
 pub mod events;
 pub mod hero;

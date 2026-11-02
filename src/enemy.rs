@@ -168,6 +168,8 @@ pub struct Orb {
 pub struct Burst {
     pub radius: f32,
     pub age: f32,
+    /// The colour of light the enemy released, if any.
+    pub colour: Option<Primary>,
 }
 
 /// Lives remaining.
@@ -508,8 +510,14 @@ fn defeat_enemies(
                 EnemyKind::Mote => light.mote_light,
                 EnemyKind::Lens => light.lens_light,
             };
-            events.write(GameEvent::LightAbsorbed { colour, at: pos.0 });
-            for hue in spectrum.absorb(colour, amount, light.gauge_capacity) {
+            let before = spectrum.gauges[colour.index()];
+            let restored = spectrum.absorb(colour, amount, light.gauge_capacity);
+            events.write(GameEvent::LightAbsorbed {
+                colour,
+                at: pos.0,
+                amount: spectrum.gauges[colour.index()] - before,
+            });
+            for hue in restored {
                 events.write(GameEvent::ColourRestored { hue });
             }
         }
@@ -522,6 +530,7 @@ fn defeat_enemies(
             Burst {
                 radius: enemy.radius() * 2.5,
                 age: 0.0,
+                colour: colour.map(|c| c.0),
             },
             Position(pos.0),
         ));

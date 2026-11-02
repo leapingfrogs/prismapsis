@@ -78,10 +78,12 @@ pub enum GameEvent {
     PickupExpiring {
         at: Vec2,
     },
-    /// A defeated enemy released light into its colour's gauge.
+    /// A defeated enemy released light into its colour's gauge. `amount`
+    /// is how much the gauge took: none once the colour is restored.
     LightAbsorbed {
         colour: Primary,
         at: Vec2,
+        amount: f32,
     },
     /// A colour came back to the level (white opens the exit).
     ColourRestored {
