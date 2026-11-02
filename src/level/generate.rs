@@ -11,8 +11,9 @@
 //! skip. Lenses of a gate's colour sit before it, a checkpoint follows it,
 //! and a pickup hidden until the gate's colour returns sits nearby.
 //!
-//! A recipe can ask for tile features too: one-way platforms, springs, mud
-//! and mirrors, placed where they can't open a way past a gate.
+//! A recipe can ask for tile features too: one-way platforms, springs, mud,
+//! mirrors, and platforms that crumble, move or break, placed where they
+//! can't open a way past a gate.
 //!
 //! Every level is checked before it's written: it must be finishable with
 //! every checkpoint in reach, and taking away any gate's phantoms must make
@@ -63,6 +64,13 @@ pub enum Feature {
     Mud,
     /// Mirror walls, `%`.
     Mirrors,
+    /// Crumbling platforms, `:`.
+    Crumbling,
+    /// Moving platforms, `_`, on tracks, `-`.
+    Movers,
+    /// A wall across the route that only one split beam colour breaks,
+    /// `!`, in wide levels only.
+    Breakable,
 }
 
 impl Feature {
@@ -72,6 +80,9 @@ impl Feature {
             Self::Springs => "springs",
             Self::Mud => "mud",
             Self::Mirrors => "mirrors",
+            Self::Crumbling => "crumbling",
+            Self::Movers => "movers",
+            Self::Breakable => "breakable",
         }
     }
 
@@ -81,6 +92,9 @@ impl Feature {
             Self::Springs => '^',
             Self::Mud => '~',
             Self::Mirrors => '%',
+            Self::Crumbling => ':',
+            Self::Movers => '_',
+            Self::Breakable => '!',
         }
     }
 }
@@ -483,15 +497,70 @@ fn place_lenses(
 }
 
 /// A plain wall ledge or platform as one of the features in use: one-way
-/// half the time, otherwise sometimes a mirror.
+/// half the time, otherwise sometimes a mirror or crumbling.
 fn ledge_feature(features: &[Feature], rng: &mut Rng) -> char {
     if features.contains(&Feature::Platforms) && rng.chance(50) {
         '='
     } else if features.contains(&Feature::Mirrors) && rng.chance(40) {
         '%'
+    } else if features.contains(&Feature::Crumbling) && rng.chance(50) {
+        ':'
     } else {
         '#'
     }
+}
+
+/// Tiles of track a moving platform runs along beyond its own width.
+const TRACK: usize = 3;
+
+/// Make the row of `width` cells from `left` at `height` a moving platform
+/// three tiles wide, running along track over the rest and on `TRACK`
+/// tiles beyond its right end, if those are open.
+fn mover(draft: &mut Draft, left: usize, width: usize, height: usize) -> bool {
+    let end = left + width + TRACK;
+    let open = end < draft.cols - 1
+        && (left + width..end).all(|c| (height - 1..=height + 1).all(|h| draft.get(c, h) == ' '));
+    if !open {
+        return false;
+    }
+    draft.fill(left..=left + 2, height, height, '_');
+    draft.fill(left + 3..=end - 1, height, height, '-');
+    true
+}
+
+/// One breakable wall in a wide level, in a colour and segment chosen by
+/// the seed: the segments are tried in turn from there until one has room.
+fn place_breakable(draft: &mut Draft, ground: &[usize], middles: &[Middle], rng: &mut Rng) {
+    let colour = rng.pick(&Primary::ALL);
+    let first = rng.range(0, middles.len() - 1);
+    for middle in middles.iter().cycle().skip(first).take(middles.len()) {
+        if breakable_wall(draft, ground, middle, colour) {
+            return;
+        }
+    }
+}
+
+/// A wall across a wide level's route that only `colour`'s split beam
+/// breaks: as tall as a gate, so the hero can't bounce over it, on the
+/// first flat stretch of a segment's middle long enough to shoot from.
+fn breakable_wall(draft: &mut Draft, ground: &[usize], middle: &Middle, colour: Primary) -> bool {
+    let flat = (middle.from + 4..middle.to.saturating_sub(4)).find(|&col| {
+        (col - 4..=col + 1).all(|c| ground[c] == ground[col])
+            && (col..=col + 1)
+                .all(|c| (ground[col]..=ground[col] + 11).all(|h| draft.get(c, h) == ' '))
+    });
+    let Some(col) = flat else {
+        return false;
+    };
+    draft.legend.insert(
+        '!',
+        format!(
+            "{{ wall = \"grey\", breakable = \"{}\" }}",
+            hue_name(colour.into())
+        ),
+    );
+    draft.fill(col..=col + 1, ground[col], ground[col] + 11, '!');
+    true
 }
 
 /// Columns of a wide level's segment that patterned ground covers, from
@@ -682,33 +751,8 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
         let gate = gates.get(i).copied();
         // Ledges, kept well away from a gate so they can't lift the hero
         // over it.
-        let rng = &mut rngs.ledges;
         let ledge_end = end - if gate.is_some() { 17 } else { 9 };
-        let mut first_ledge = None;
-        for _ in 0..rng.range(1, 2) {
-            let width = rng.range(3, 5);
-            if start + 3 + width >= ledge_end {
-                break;
-            }
-            let left = rng.range(start + 3, ledge_end - width);
-            let floor = (left - 1..=left + width)
-                .map(|c| ground[c])
-                .max()
-                .unwrap_or(0);
-            let height = floor + rng.range(4, 5);
-            let free = (left - 1..=left + width)
-                .all(|c| (height - 1..=height + 2).all(|h| draft.get(c, h) == ' '));
-            if !free {
-                continue;
-            }
-            let ch = if rng.chance(60) {
-                ledge_feature(&recipe.features, &mut rngs.features)
-            } else {
-                letter(rng.pick(&Hue::ALL[..6]))
-            };
-            draft.fill(left..=left + width - 1, height, height, ch);
-            first_ledge.get_or_insert((left + width / 2, height + 1));
-        }
+        let first_ledge = ledges(&mut draft, recipe, &ground, start..ledge_end, rngs);
 
         if let Some(gate) = gate {
             let floor = ground[end - 1];
@@ -740,10 +784,58 @@ fn wide(recipe: &Recipe, gates: &[Hue], rngs: &mut Streams) -> Draft {
         &middles,
         &mut rngs.features,
     );
+    if recipe.features.contains(&Feature::Breakable) {
+        place_breakable(&mut draft, &ground, &middles, &mut rngs.features);
+    }
     draft.set(3, ground[3], '@');
     let end = cols - 1;
     draft.fill(end - 3..=end - 2, ground[end - 2], ground[end - 2] + 2, 'X');
     draft
+}
+
+/// One or two ledges over the ground from `span.start` up to `span.end`,
+/// returning a spot just above the first one placed.
+fn ledges(
+    draft: &mut Draft,
+    recipe: &Recipe,
+    ground: &[usize],
+    span: std::ops::Range<usize>,
+    rngs: &mut Streams,
+) -> Option<(usize, usize)> {
+    let (start, ledge_end) = (span.start, span.end);
+    let rng = &mut rngs.ledges;
+    let mut first_ledge = None;
+    for _ in 0..rng.range(1, 2) {
+        let width = rng.range(3, 5);
+        if start + 3 + width >= ledge_end {
+            break;
+        }
+        let left = rng.range(start + 3, ledge_end - width);
+        let floor = (left - 1..=left + width)
+            .map(|c| ground[c])
+            .max()
+            .unwrap_or(0);
+        let height = floor + rng.range(4, 5);
+        let free = (left - 1..=left + width)
+            .all(|c| (height - 1..=height + 2).all(|h| draft.get(c, h) == ' '));
+        if !free {
+            continue;
+        }
+        let ch = if rng.chance(60) {
+            ledge_feature(&recipe.features, &mut rngs.features)
+        } else {
+            letter(rng.pick(&Hue::ALL[..6]))
+        };
+        let moving = ch == '#'
+            && recipe.features.contains(&Feature::Movers)
+            && rngs.features.chance(60)
+            && mover(draft, left, width, height);
+        if !moving {
+            draft.fill(left..=left + width - 1, height, height, ch);
+        }
+        first_ledge.get_or_insert((left + width / 2, height + 1));
+    }
+    first_ledge
 }
 
 /// A narrow level climbing platforms on alternating sides, each gate a
@@ -861,6 +953,25 @@ fn climb_features(
             draft.fill(col..=col + 1, 4 + CLIMB * i, 4 + CLIMB * i, '^');
         }
     }
+    if features.contains(&Feature::Movers) {
+        // A moving platform out over the gap from the open end of a
+        // platform, never next to a gate, so it can't carry the hero past.
+        for (i, &(left, right)) in spans.iter().enumerate().take(platforms.len()) {
+            if gate(i) || gate(i + 1) || gate(i + 2) || !rng.chance(40) {
+                continue;
+            }
+            let height = 4 + CLIMB * i;
+            let inner = if left == 1 { right - 2 } else { left };
+            let open = if left == 1 { right + 1 } else { left - TRACK };
+            if open >= 1 && open + TRACK < draft.cols {
+                let clear = (open..open + TRACK).all(|c| draft.get(c, height) == ' ');
+                if clear {
+                    draft.fill(inner..=inner + 2, height, height, '_');
+                    draft.fill(open..=open + TRACK - 1, height, height, '-');
+                }
+            }
+        }
+    }
     if features.contains(&Feature::Mirrors) {
         let side = draft.cols - 1;
         for _ in 0..platforms.len() / 2 {
@@ -889,8 +1000,9 @@ fn build(recipe: &Recipe, gates: &[Hue], attempt: u64) -> Draft {
 /// checkpoint in reach, and no gate can be bypassed even by the
 /// full-strength hero.
 fn sound(draft: &Draft, name: &str, recipe: &Recipe, gates: &[Hue]) -> bool {
+    let wide_only = [Feature::Mud, Feature::Breakable];
     let missing = recipe.features.iter().any(|&feature| {
-        (recipe.shape != Shape::Tall || feature != Feature::Mud)
+        (recipe.shape != Shape::Tall || !wide_only.contains(&feature))
             && !draft.map.iter().flatten().any(|&ch| ch == feature.char())
     });
     if missing {
@@ -1108,6 +1220,25 @@ mod tests {
             // Without features, none of them.
             let level = parse(&generate("F", &plain).unwrap()).unwrap();
             assert!(level.walls.iter().all(|(_, _, t)| *t == Traits::default()));
+        }
+    }
+
+    #[test]
+    fn changing_platforms_are_placed_when_asked_for() {
+        let changing = vec![Feature::Crumbling, Feature::Movers, Feature::Breakable];
+        for (shape, seed) in [(Shape::Wide, 11), (Shape::Tall, 12)] {
+            let made = Recipe {
+                features: changing.clone(),
+                ..recipe(seed, shape, &[Tint::Red, Tint::Cyan])
+            };
+            let level = parse(&generate("C", &made).unwrap()).unwrap();
+            assert!(solve_within(&level, Limits::COMFORT).is_ok());
+            let walls =
+                |pick: fn(&Traits) -> bool| level.walls.iter().filter(|(_, _, t)| pick(t)).count();
+            assert!(walls(|t| t.crumble > 0) > 0, "{shape:?} crumbling");
+            assert!(!level.movers.is_empty(), "{shape:?} movers");
+            // Tall levels have no breakable walls.
+            assert_eq!(walls(|t| t.breakable.is_some()) > 0, shape == Shape::Wide);
         }
     }
 

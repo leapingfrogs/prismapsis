@@ -10,4 +10,11 @@ levels = [
     "06-cyan-spire.toml",
     "07-mixed-light.toml",
     "08-full-spectrum.toml",
+    "09-crumbling-light.toml",
+    "10-iron-tracks.toml",
+    "11-breaking-point.toml",
+    "12-furnace-climb.toml",
+    "13-frost-gates.toml",
+    "14-ice-spire.toml",
+    "15-aurora.toml",
 ]

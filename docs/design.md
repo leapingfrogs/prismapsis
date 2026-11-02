@@ -315,8 +315,8 @@ output is committed; the game only ever loads level files.
 - **Tall levels** climb platforms on alternating sides, five tiles apart.
   Each gate is a phantom platform the climb can't skip.
 - **Tile features** are opt-in: a recipe's `features` lists any of
-  `platforms`, `springs`, `mud` and `mirrors`, and a layout without each
-  one asked for is thrown away like an unsound one. They draw from their
+  `platforms`, `springs`, `mud`, `mirrors`, `crumbling`, `movers` and
+  `breakable`, and a layout without each one asked for is thrown away like an unsound one. They draw from their
   own random stream, and only plain walls change, so a recipe without
   features lays out exactly as before.
   - Wide levels: plain ledges become one-way platforms or mirrors; mud
@@ -328,8 +328,22 @@ output is committed; the game only ever loads level files.
     spring pad sits at the wall end of some platforms, never within two
     platforms of a gate, so a spring can't skip one; mirror patches line
     the side walls. Tall levels have no mud, which would stall the climb.
+  - Changing platforms: plain ledges and climb platforms can crumble. In
+    wide levels some plain ledges become moving platforms, riding a track
+    over the rest of the ledge and three tiles beyond. In tall levels a
+    moving platform runs out over the gap from the open end of a
+    platform, never within two platforms of a gate, so it can't carry the
+    hero past one. Wide levels with `breakable` get a wall as tall as a
+    gate across the first flat stretch with room to shoot from, which
+    only one split beam colour, chosen by the seed, breaks. Tall levels
+    have no breakable walls.
+  - Each feature draws its random numbers only when a recipe asks for
+    it, so adding the changing platforms left the first eight levels
+    exactly as they were.
   - The campaign introduces them in turn: platforms from level 2, springs
-    from 3, mud from 4, mirrors from 5, and all four in the last two.
+    from 3, mud from 4, mirrors from 5, all four in 7 and 8; then
+    crumbling platforms from 9, moving platforms from 10, breakable walls
+    from 11, and every feature in the last level, 15.
 - **Difficulty rises** with more colour gates, more enemy pressure (shorter
   wave intervals, more lenses) and longer levels. Jumps stay comfortable.
 - **Colours return primaries first.** Early levels gate on red, green and
@@ -362,7 +376,8 @@ output is committed; the game only ever loads level files.
   The level is solvable if the exit can be touched with white restored. `just level-check` runs it
   on every level, hand-made ones included, and says whether each is
   comfortable.
-- **First campaign:** eight levels, six wide and two tall.
+- **Campaign:** fifteen levels, eleven wide and four tall, through five
+  themes.
 - **Later:** branches and parallel routes (optional side paths to pickups,
   two ways past a gate), hand-drawn set pieces spliced into the route, and
   placing the changing tile kinds (6b-2) in generated levels, using the
