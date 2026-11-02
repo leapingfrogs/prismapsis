@@ -138,6 +138,9 @@ const EXIT_CLOSED: Color = Color::srgb(0.55, 0.56, 0.62);
 /// How strongly the doorway glows while closed.
 const EXIT_CLOSED_GLOW: f32 = 0.08;
 
+/// How much brighter than white the open exit's light burns.
+const EXIT_LIGHT: f32 = 1.5;
+
 /// The light filling an exit's doorway.
 #[derive(Component, Debug)]
 struct ExitLight;
@@ -201,7 +204,8 @@ fn animate_exit(
     }
     for mut light in &mut lights {
         let alpha = EXIT_CLOSED_GLOW + open * (0.55 + 0.35 * pulse);
-        light.color = white.with_alpha(alpha);
+        // Once open, the light burns brighter than white, so it blooms.
+        light.color = crate::render::glowing(white, 1.0 + open * EXIT_LIGHT).with_alpha(alpha);
     }
 }
 

@@ -1,5 +1,5 @@
 //! Developer tools, compiled only with the `dev` feature: a live tuning panel
-//! for bounce parameters. Toggle with F1 or backtick; R resets the hero.
+//! for bounce parameters. Toggle with F1 or backtick; R resets the hero; F2 turns bloom on and off.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::system::SystemParam;
@@ -17,6 +17,7 @@ use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
+use crate::render::BloomOn;
 use crate::sound::{Auditions, SoundId, SoundSettings};
 
 #[derive(Debug, Default)]
@@ -27,10 +28,14 @@ impl Plugin for DevToolsPlugin {
         if !app.is_plugin_added::<FrameTimeDiagnosticsPlugin>() {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
+        // PRISMAPSIS_BLOOM=0 starts with bloom off, for comparing.
+        if std::env::var("PRISMAPSIS_BLOOM").is_ok_and(|v| v == "0") {
+            app.insert_resource(BloomOn(false));
+        }
         app.add_plugins(EguiPlugin::default())
             .insert_resource(PanelVisible(true))
             .init_resource::<AuditionChoice>()
-            .add_systems(Update, (toggle_panel, reset_hero))
+            .add_systems(Update, (toggle_panel, reset_hero, toggle_bloom))
             .add_systems(EguiPrimaryContextPass, tuning_panel);
     }
 }
@@ -71,6 +76,13 @@ const PRESENT_MODES: [PresentMode; 6] = [
     PresentMode::Mailbox,
     PresentMode::Immediate,
 ];
+
+/// F2 turns bloom on and off.
+fn toggle_bloom(keys: Res<ButtonInput<KeyCode>>, mut bloom: ResMut<BloomOn>) {
+    if keys.just_pressed(KeyCode::F2) {
+        bloom.0 = !bloom.0;
+    }
+}
 
 fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<PanelVisible>) {
     if keys.any_just_pressed([KeyCode::F1, KeyCode::Backquote]) {

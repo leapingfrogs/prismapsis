@@ -1,7 +1,8 @@
 //! Presentation: draws the simulation and moves the camera. Nothing here feeds
 //! back into game logic, so it can later be swapped for a 3D presentation.
 
-use bevy::camera::ScalingMode;
+use bevy::camera::{Hdr, ScalingMode};
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
 
@@ -38,6 +39,7 @@ pub struct PresentationPlugin;
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BeamView>()
+            .init_resource::<BloomOn>()
             .add_systems(
                 Startup,
                 (
@@ -52,6 +54,7 @@ impl Plugin for PresentationPlugin {
             .add_systems(
                 Update,
                 (
+                    apply_bloom,
                     draw_hero,
                     draw_prism,
                     toggle_fullscreen,
@@ -144,11 +147,74 @@ fn tint_frozen_prism(frozen: Res<PrismFrozen>, mut prisms: Query<&mut Sprite, Wi
 #[derive(Component, Debug)]
 pub struct MainCamera;
 
+/// Whether bright light blooms: things lit brighter than white spill a
+/// soft glow round them.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BloomOn(pub bool);
+
+impl Default for BloomOn {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+/// Bloom only takes what's brighter than white, so the art keeps its
+/// colours and only light glows.
+const BLOOM: Bloom = Bloom {
+    intensity: 0.3,
+    prefilter: BloomPrefilter {
+        threshold: 1.0,
+        threshold_softness: 0.3,
+    },
+    composite_mode: BloomCompositeMode::Additive,
+    ..Bloom::NATURAL
+};
+
+/// `colour` lit `by` times brighter, past white where `by` is over 1, so
+/// it blooms.
+#[must_use]
+pub fn glowing(colour: Color, by: f32) -> Color {
+    let linear = colour.to_linear();
+    Color::LinearRgba(LinearRgba::new(
+        linear.red * by,
+        linear.green * by,
+        linear.blue * by,
+        linear.alpha,
+    ))
+}
+
+/// How brightly each light glows, past white.
+const BEAM_LIGHT: f32 = 1.4;
+const BEAM_CORE_LIGHT: f32 = 3.0;
+const MOTE_LIGHT: f32 = 1.8;
+const ORB_LIGHT: f32 = 2.2;
+const BURST_LIGHT: f32 = 2.0;
+
+/// Turn bloom on or off on the camera.
+fn apply_bloom(
+    mut commands: Commands,
+    bloom: Res<BloomOn>,
+    cameras: Query<Entity, With<MainCamera>>,
+) {
+    if !bloom.is_changed() {
+        return;
+    }
+    for camera in &cameras {
+        if bloom.0 {
+            commands.entity(camera).insert(BLOOM);
+        } else {
+            commands.entity(camera).remove::<Bloom>();
+        }
+    }
+}
+
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Name::new("Main Camera"),
         MainCamera,
         Camera2d,
+        // Light brighter than white needs room above it.
+        Hdr,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::FixedVertical {
                 viewport_height: DESIGN_HEIGHT,
@@ -386,8 +452,13 @@ fn spawn_beam_visuals(
         })
     };
     let beam_materials = BeamMaterials {
-        glow: BeamColour::ALL.map(|c| material(beam_colour(c))),
-        core: BeamColour::ALL.map(|c| material(beam_colour(c).mix(&Color::WHITE, BEAM_CORE_WHITE))),
+        glow: BeamColour::ALL.map(|c| material(glowing(beam_colour(c), BEAM_LIGHT))),
+        core: BeamColour::ALL.map(|c| {
+            material(glowing(
+                beam_colour(c).mix(&Color::WHITE, BEAM_CORE_WHITE),
+                BEAM_CORE_LIGHT,
+            ))
+        }),
     };
     // A unit square, stretched to each piece's length and width.
     let mesh = meshes.add(Rectangle::new(1.0, 1.0));
@@ -592,6 +663,15 @@ pub const fn enemy_animation(kind: EnemyKind) -> (Figure, f32, f32) {
 }
 
 /// Motes are twinkling sparks; lenses are hexagonal crystals with an eye.
+/// An enemy's colour in play: motes are sparks of light, so they glow.
+fn shown_enemy(kind: EnemyKind, colour: Option<Primary>) -> Color {
+    let base = coloured_enemy(kind, colour);
+    match kind {
+        EnemyKind::Mote => glowing(base, MOTE_LIGHT),
+        EnemyKind::Lens => base,
+    }
+}
+
 fn draw_enemies(
     mut commands: Commands,
     sheet: Res<Sheet>,
@@ -600,7 +680,7 @@ fn draw_enemies(
     for (entity, pos, enemy, colour) in &enemies {
         let (figure, rate, every) = enemy_animation(enemy.kind);
         commands.entity(entity).insert((
-            sheet.sprite(figure, coloured_enemy(enemy.kind, colour.map(|c| c.0))),
+            sheet.sprite(figure, shown_enemy(enemy.kind, colour.map(|c| c.0))),
             Animation {
                 figure,
                 rate,
@@ -616,7 +696,7 @@ fn draw_enemies(
 fn tint_enemies(mut enemies: Query<(&Enemy, Option<&Colour>, &mut Sprite), Changed<Enemy>>) {
     for (enemy, colour, mut sprite) in &mut enemies {
         let flash = (enemy.flash / HIT_FLASH).clamp(0.0, 1.0);
-        let base = coloured_enemy(enemy.kind, colour.map(|c| c.0));
+        let base = shown_enemy(enemy.kind, colour.map(|c| c.0));
         sprite.color = base.mix(&ENEMY_HIT_COLOUR, flash);
     }
 }
@@ -628,7 +708,7 @@ fn draw_orbs(
 ) {
     for (entity, pos) in &orbs {
         commands.entity(entity).insert((
-            sheet.sprite(Figure::Orb, ORB_COLOUR),
+            sheet.sprite(Figure::Orb, glowing(ORB_COLOUR, ORB_LIGHT)),
             Animation {
                 figure: Figure::Orb,
                 rate: 12.0,
@@ -650,7 +730,7 @@ fn draw_bursts(
     for (entity, pos) in &bursts {
         commands.entity(entity).insert((
             Mesh2d(meshes.add(Annulus::new(0.8, 1.0))),
-            MeshMaterial2d(materials.add(BURST_COLOUR)),
+            MeshMaterial2d(materials.add(glowing(BURST_COLOUR, BURST_LIGHT))),
             Transform::from_translation(pos.0.extend(4.0)).with_scale(Vec3::ZERO),
         ));
     }
@@ -665,7 +745,7 @@ fn animate_bursts(
         let progress = (burst.age / BURST_LIFETIME).clamp(0.0, 1.0);
         transform.scale = Vec3::new(burst.radius, burst.radius, 1.0) * progress.max(0.05);
         if let Some(mut material) = materials.get_mut(&material.0) {
-            material.color = BURST_COLOUR.with_alpha(1.0 - progress);
+            material.color = glowing(BURST_COLOUR, BURST_LIGHT).with_alpha(1.0 - progress);
         }
     }
 }
