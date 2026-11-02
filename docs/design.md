@@ -385,6 +385,26 @@ output is committed; the game only ever loads level files.
 - Level files still reload while paused, so a level can be edited without
   the hero moving.
 
+## Screens and score
+
+- **The title** shows over the campaign's first level, greyed and still,
+  with Play and Quit. Playing starts a new game from the first level with
+  no abilities and no points. A level given with `--level` goes straight
+  into play.
+- **Game over** comes when the last life is lost. It shows the score and
+  the best, and offers Continue, which plays the same level again with the
+  score back at nothing, or going back to the title.
+- **Finishing the campaign** shows the score and the best, then goes back
+  to the title.
+- **Menus** stop the game clock as pausing does, so the level waits behind
+  them, and P does nothing. Up and down move through a menu; enter, space
+  or the gamepad's south or start button chooses. A menu ignores presses
+  for its first 0.6 s, so a press meant for play doesn't choose something.
+- **Score**, counted from the game's events: 100 for a mote, 500 for a
+  lens, 250 for a pickup, 1000 for each colour restored (white included)
+  and 5000 for finishing a level. It shows in the top right corner. The
+  best score lasts until the game is closed; it isn't saved yet.
+
 ## Resolution and art
 
 - The world is **1080 units tall** at any window size; width follows the
@@ -544,5 +564,6 @@ output is committed; the game only ever loads level files.
 | 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
 | 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
-| 8 | Game loop | Menus, game over, score, music, audio settings. Pause is done. |
+| 8-1 | Screens and score | Title, game over and campaign-finished screens with menus that stop the clock; continuing after a game over; points from game events, shown in play; the best score this session. |
+| 8-2 | Music and audio | Music, and audio settings in the menus. |
 | 9+ | 3D | To be designed. |

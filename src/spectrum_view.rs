@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use crate::level::{CurrentLevel, Solid};
 use crate::light::{ExitGate, Hue, LevelsCompleted, LightTuning, Phantom, Primary, Spectrum};
+use crate::screens::{Screen, in_play};
 
 /// Display colour of each hue.
 #[must_use]
@@ -301,14 +302,20 @@ fn spawn_banner(mut commands: Commands) {
     ));
 }
 
-/// Show the banner when a level is completed, naming the next level.
+/// Show the banner when a level is completed, naming the next level. A
+/// menu screen hides it.
 fn show_banner(
     time: Res<Time>,
     completed: Res<LevelsCompleted>,
     level: Option<Res<CurrentLevel>>,
+    screen: Option<Res<State<Screen>>>,
     mut banners: Query<(&mut Banner, &mut Visibility, &mut Text)>,
 ) {
+    let playing = in_play(screen);
     for (mut banner, mut visibility, mut text) in &mut banners {
+        if !playing {
+            banner.0 = 0.0;
+        }
         if completed.is_changed() && completed.0 > 0 {
             banner.0 = BANNER_TIME;
             let next = level.as_ref().map_or("", |l| l.0.name.as_str());

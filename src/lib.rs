@@ -22,6 +22,8 @@ pub mod physics;
 pub mod powerup;
 pub mod prism;
 pub mod render;
+pub mod score;
+pub mod screens;
 pub mod sound;
 pub mod spectrum_view;
 
@@ -51,6 +53,12 @@ impl Plugin for GamePlugin {
         if let Some((level, path)) = &self.level {
             app.insert_resource(level::Campaign::single(level.clone(), path.clone()));
         }
+        // A level file goes straight into play.
+        let start = if self.level.is_some() {
+            screens::Screen::Playing
+        } else {
+            screens::Screen::Title
+        };
         app.insert_resource(ClearColor(BACKGROUND))
             // Different drops each run; tests keep the fixed default seed.
             .insert_resource(powerup::DropRng::seeded(time_seed()))
@@ -58,6 +66,8 @@ impl Plugin for GamePlugin {
                 SimulationPlugin,
                 render::PresentationPlugin,
                 sound::SoundPlugin,
+                score::ScorePlugin,
+                screens::ScreensPlugin { start },
             ));
         #[cfg(feature = "dev")]
         app.add_plugins((dev_tools::DevToolsPlugin, level::reload::LevelReloadPlugin));

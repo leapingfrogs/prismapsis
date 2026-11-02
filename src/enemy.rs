@@ -590,6 +590,7 @@ fn hero_hits(
     spectrum.halve_partial();
     if lives.0 == 0 {
         reset.0 = true;
+        events.write(GameEvent::OutOfLives);
     }
     pos.0 = respawn.0;
     prev.0 = respawn.0;
@@ -854,11 +855,26 @@ mod tests {
         let mut app = sim_app();
         run(&mut app, frames_until_first_wave());
         assert!(count::<Mote>(&mut app) > 0);
-        app.insert_resource(Lives(1));
+        crate::events::count_events(&mut app, GameEvent::OutOfLives);
+        app.insert_resource(Lives(2));
         let hero = hero_position(&mut app);
         spawn_mote_at(&mut app, hero);
         app.update();
         app.update();
+        assert_eq!(app.world().resource::<crate::events::Seen>().0, 0);
+        app.insert_resource(Lives(1));
+        let hero = hero_position(&mut app);
+        app.world_mut()
+            .resource_mut::<EnemyTuning>()
+            .respawn_invulnerability = 0.0;
+        app.world_mut()
+            .query::<&mut Invulnerable>()
+            .iter_mut(app.world_mut())
+            .for_each(|mut i| i.0 = 0.0);
+        spawn_mote_at(&mut app, hero);
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<crate::events::Seen>().0, 1);
         assert_eq!(app.world().resource::<Lives>().0, STARTING_LIVES);
         assert_eq!(count::<Mote>(&mut app), 0);
         assert_eq!(count::<Lens>(&mut app), test_room().lenses.len());

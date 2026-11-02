@@ -158,6 +158,11 @@ impl Campaign {
         &self.levels[self.current]
     }
 
+    /// Back to the first level.
+    pub const fn restart(&mut self) {
+        self.current = 0;
+    }
+
     /// Move on to the next level, back to the first after the last.
     pub const fn advance(&mut self) {
         self.current = (self.current + 1) % self.levels.len();
@@ -363,18 +368,23 @@ fn spawn_level(
     level.0.apply_tuning(&mut enemy, &mut light);
 }
 
-/// Finishing a level moves on to the next in the campaign.
+/// Finishing a level moves on to the next in the campaign. Finishing the
+/// last of several finishes the campaign.
 fn next_level(
     completed: Res<LevelsCompleted>,
     mut seen: Local<u32>,
     mut campaign: ResMut<Campaign>,
     mut level: ResMut<CurrentLevel>,
+    mut events: MessageWriter<GameEvent>,
 ) {
     if completed.0 == *seen {
         return;
     }
     *seen = completed.0;
     campaign.advance();
+    if campaign.current == 0 && campaign.levels.len() > 1 {
+        events.write(GameEvent::CampaignFinished);
+    }
     level.set_if_neq(CurrentLevel(campaign.level().level.clone()));
 }
 
@@ -685,6 +695,7 @@ mod tests {
     #[test]
     fn finishing_a_level_moves_on_through_the_campaign() {
         let mut app = sim_app();
+        crate::events::count_events(&mut app, GameEvent::CampaignFinished);
         let campaign = Campaign::dev();
         assert_eq!(campaign.levels.len(), 2);
         assert_eq!(campaign.level().level, test_room());
@@ -696,12 +707,14 @@ mod tests {
         assert_eq!(count::<Solid>(&mut app), tower.walls.len());
         assert!(hero(&mut app).distance(tower.start) < 30.0);
         assert_eq!(app.world().resource::<RespawnPoint>().0, tower.start);
+        assert_eq!(app.world().resource::<crate::events::Seen>().0, 0);
 
-        // After the last level, back to the first.
+        // After the last level, back to the first, finishing the campaign.
         for _ in 1..campaign.levels.len() {
             finish_level(&mut app);
         }
         assert_eq!(app.world().resource::<CurrentLevel>().0, test_room());
+        assert_eq!(app.world().resource::<crate::events::Seen>().0, 1);
     }
 
     #[test]
@@ -709,6 +722,10 @@ mod tests {
         let mut campaign = Campaign::single(test_room(), PathBuf::from("x.toml"));
         campaign.advance();
         assert_eq!(campaign.current, 0);
+        let mut dev = Campaign::dev();
+        dev.advance();
+        dev.restart();
+        assert_eq!(dev.current, 0);
     }
 
     #[test]

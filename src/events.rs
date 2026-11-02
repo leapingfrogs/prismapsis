@@ -1,11 +1,28 @@
-//! Moments in the simulation that presentation (sound now; particles and
-//! score later) reacts to. The simulation writes them and never reads them.
+//! Moments in the simulation that presentation (sound, and later
+//! particles), the score and the game's screens react to. The simulation
+//! writes them and never reads them.
 
 use bevy::prelude::*;
 
 use crate::enemy::EnemyKind;
 use crate::light::{Hue, Primary};
 use crate::powerup::PowerUp;
+
+/// Count every `event` the app writes from now on, in `Seen`.
+#[cfg(test)]
+pub fn count_events(app: &mut App, event: GameEvent) {
+    app.init_resource::<Seen>().add_systems(
+        Update,
+        move |mut events: MessageReader<GameEvent>, mut seen: ResMut<Seen>| {
+            seen.0 += events.read().filter(|&&e| e == event).count();
+        },
+    );
+}
+
+/// How many events `count_events` has seen.
+#[cfg(test)]
+#[derive(Resource, Debug, Default)]
+pub struct Seen(pub usize);
 
 /// Something that just happened in the game. Positions are in world units.
 #[derive(Message, Debug, Clone, Copy, PartialEq)]
@@ -44,6 +61,11 @@ pub enum GameEvent {
         at: Vec2,
     },
     RoomReset,
+    /// The hero lost its last life; the room resets with lives refilled.
+    OutOfLives,
+    /// The last level of the campaign was finished; it starts again from the
+    /// first.
+    CampaignFinished,
     PickupDropped {
         power: PowerUp,
         at: Vec2,
