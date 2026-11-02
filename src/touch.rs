@@ -4,14 +4,15 @@
 //! Touches become key presses, so the game reads one set of inputs
 //! whether they come from the keyboard, a gamepad or a screen. Each button
 //! holds its key while any finger is on it, so several can be held at once
-//! and a finger sliding onto a button presses it. A finger that starts on
-//! hold stays with it, and sliding it up or down turns the held prism. The
+//! and a finger sliding onto a button presses it. A tap on hold locks the
+//! prism held until the next tap. A finger that starts on hold stays with
+//! it, and sliding it up or down turns the prism and leaves it locked. The
 //! buttons appear after the first touch and hide again on a key or gamepad
 //! press. Presentation only.
 
 use bevy::input::InputSystems;
 use bevy::input::keyboard::KeyboardInput;
-use bevy::input::touch::Touches;
+use bevy::input::touch::{Touch, Touches};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
@@ -22,10 +23,32 @@ use crate::screens::{Choice, Menu, MenuLine, Screen, in_play};
 #[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
 pub struct TouchControls {
     pub shown: bool,
-    /// Keys held by fingers on buttons.
+    /// Whether a tap has locked the sliding button's key held, with no
+    /// finger on it.
+    pub locked: bool,
+    /// Keys held by fingers on buttons, or by the lock.
     held: Vec<KeyCode>,
     /// Keys pressed by a tap on a menu, let go the frame after.
     tapped: Vec<KeyCode>,
+    /// The finger that started on a sliding button, while it's down.
+    grip: Option<Grip>,
+}
+
+impl TouchControls {
+    /// Let go of the lock and forget any finger on a sliding button.
+    const fn unlock(&mut self) {
+        self.locked = false;
+        self.grip = None;
+    }
+}
+
+/// A finger that started on a sliding button.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Grip {
+    id: u64,
+    /// Whether it has slid far enough to hold an up or down key, which
+    /// makes lifting it a slide rather than a tap.
+    slid: bool,
 }
 
 /// An on-screen button and the key it holds.
@@ -88,6 +111,13 @@ pub fn slide_key(slide: [KeyCode; 2], dy: f32, height: f32) -> Option<KeyCode> {
 #[derive(Component, Debug)]
 pub struct TouchOverlay;
 
+/// The hold button's label, which says whether it's locked.
+#[derive(Component, Debug)]
+pub struct HoldLabel;
+
+const HOLD_TEXT: &str = "Hold";
+const HELD_TEXT: &str = "Held";
+
 const BUTTON_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.16);
 const PRESSED_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.4);
 const EDGE_COLOUR: Color = Color::srgba(0.8, 0.82, 0.9, 0.45);
@@ -135,12 +165,21 @@ fn show_controls(
     if controls.shown != shown {
         controls.shown = shown;
     }
+    // Keyboard and gamepad players are never left with a locked prism.
+    if keyed && (controls.locked || controls.grip.is_some()) {
+        controls.unlock();
+    }
 }
 
 /// Hold each visible button's key while a finger is on it, and a sliding
 /// button's keys while the finger that started on it is down.
+///
+/// Lifting that finger after a tap toggles the lock, and after a slide
+/// locks it. The lock holds the sliding button's key until play ends or
+/// the buttons hide.
 fn press_buttons(
     touches: Res<Touches>,
+    screen: Option<Res<State<Screen>>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     buttons: Query<(
         &TouchButton,
@@ -157,27 +196,76 @@ fn press_buttons(
     // UI nodes are laid out in physical pixels.
     let scale = windows.single().map_or(1.0, Window::scale_factor);
     let visible: Vec<_> = buttons.iter().filter(|(.., shown)| shown.get()).collect();
+    // The key of the sliding button a touch started on, and the up or down
+    // key its slide holds, if it has gone far enough.
+    let sliding = |touch: &Touch| {
+        let start = touch.start_position() * scale;
+        let dy = touch.position().y * scale - start.y;
+        visible.iter().find_map(|(button, node, transform, _)| {
+            let slide = button.slide?;
+            node.contains_point(**transform, start)
+                .then(|| (button.key, slide_key(slide, dy, node.size().y)))
+        })
+    };
+
+    if !in_play(screen) && (controls.locked || controls.grip.is_some()) {
+        controls.unlock();
+    }
+    for touch in touches.iter_just_pressed() {
+        if sliding(touch).is_some() {
+            controls.grip = Some(Grip {
+                id: touch.id(),
+                slid: false,
+            });
+        }
+    }
+    if let Some(mut grip) = controls.grip {
+        let id = grip.id;
+        let finger = touches
+            .get_pressed(id)
+            .or_else(|| touches.get_released(id))
+            .or_else(|| touches.iter_just_canceled().find(|touch| touch.id() == id));
+        grip.slid |= finger
+            .and_then(sliding)
+            .is_some_and(|(_, slid)| slid.is_some());
+        if touches.get_pressed(id).is_some() {
+            if controls.grip != Some(grip) {
+                controls.grip = Some(grip);
+            }
+        } else {
+            // A slide parks the prism and a tap toggles it; a cancelled
+            // tap leaves it be.
+            if grip.slid {
+                controls.locked = true;
+            } else if touches.just_released(id) {
+                controls.locked = !controls.locked;
+            }
+            controls.grip = None;
+        }
+    }
+
     let mut wanted = Vec::new();
     let mut want = |key| {
         if !wanted.contains(&key) {
             wanted.push(key);
         }
     };
+    if controls.locked {
+        for (button, ..) in &visible {
+            if button.slide.is_some() {
+                want(button.key);
+            }
+        }
+    }
     for touch in touches.iter() {
-        let start = touch.start_position() * scale;
-        let point = touch.position() * scale;
-        let sliding = visible.iter().find_map(|(button, node, transform, _)| {
-            let slide = button.slide?;
-            node.contains_point(**transform, start)
-                .then_some((button.key, slide, node.size().y))
-        });
-        if let Some((key, slide, height)) = sliding {
+        if let Some((key, slid)) = sliding(touch) {
             want(key);
-            if let Some(key) = slide_key(slide, point.y - start.y, height) {
+            if let Some(key) = slid {
                 want(key);
             }
             continue;
         }
+        let point = touch.position() * scale;
         for (button, node, transform, _) in &visible {
             if node.contains_point(**transform, point) {
                 want(button.key);
@@ -253,6 +341,14 @@ fn nearest_line(
 /// A button: a translucent rounded square with a label.
 fn button(button: TouchButton, label: &str, size: f32) -> impl Bundle {
     (
+        square(button, label, size),
+        children![button_label(label, size)],
+    )
+}
+
+/// A button's rounded square, without its label.
+fn square(button: TouchButton, label: &str, size: f32) -> impl Bundle {
+    (
         Name::new(format!("Touch {label}")),
         button,
         Node {
@@ -266,14 +362,18 @@ fn button(button: TouchButton, label: &str, size: f32) -> impl Bundle {
         },
         BackgroundColor(BUTTON_COLOUR),
         BorderColor::all(EDGE_COLOUR),
-        children![(
-            Text::new(label),
-            TextFont {
-                font_size: FontSize::VMin(size / 3.5),
-                ..default()
-            },
-            TextColor(LABEL_COLOUR),
-        )],
+    )
+}
+
+/// The label on a button `size` across.
+fn button_label(label: &str, size: f32) -> impl Bundle {
+    (
+        Text::new(label),
+        TextFont {
+            font_size: FontSize::VMin(size / 3.5),
+            ..default()
+        },
+        TextColor(LABEL_COLOUR),
     )
 }
 
@@ -288,9 +388,10 @@ fn group(direction: FlexDirection) -> Node {
     }
 }
 
-/// Spin on the left with hovering above it; fire and hold on the right,
-/// sliding hold up turning the prism anticlockwise and down clockwise, as
-/// Q and E do; pause at the top right, under the score.
+/// Spin on the left with hovering above it; fire on the right with hold
+/// above it in reach of the same thumb, sliding hold up turning the prism
+/// anticlockwise and down clockwise, as Q and E do; pause at the top
+/// right, under the score.
 fn spawn_controls(mut commands: Commands) {
     commands.spawn((
         Name::new("Touch controls"),
@@ -341,13 +442,16 @@ fn spawn_controls(mut commands: Commands) {
                         ],
                     ),
                     (
-                        group(FlexDirection::Row),
+                        group(FlexDirection::Column),
                         children![
-                            button(
-                                TouchButton::new(KeyCode::ShiftLeft)
-                                    .sliding(KeyCode::KeyQ, KeyCode::KeyE),
-                                "Hold",
-                                15.0,
+                            (
+                                square(
+                                    TouchButton::new(KeyCode::ShiftLeft)
+                                        .sliding(KeyCode::KeyQ, KeyCode::KeyE),
+                                    HOLD_TEXT,
+                                    15.0,
+                                ),
+                                children![(button_label(HOLD_TEXT, 15.0), HoldLabel)],
                             ),
                             button(TouchButton::new(KeyCode::Space), "Fire", 24.0),
                         ],
@@ -359,7 +463,8 @@ fn spawn_controls(mut commands: Commands) {
 }
 
 /// Show the buttons in play once touched, the hover buttons only with
-/// anti-gravity, and pressed buttons brighter.
+/// anti-gravity, pressed or locked buttons brighter, and hold's label
+/// saying whether it's locked.
 fn update_controls(
     controls: Res<TouchControls>,
     screen: Option<Res<State<Screen>>>,
@@ -369,7 +474,18 @@ fn update_controls(
         (&TouchButton, &mut Visibility, &mut BackgroundColor),
         Without<TouchOverlay>,
     >,
+    mut labels: Query<&mut Text, With<HoldLabel>>,
 ) {
+    let wanted = if controls.locked {
+        HELD_TEXT
+    } else {
+        HOLD_TEXT
+    };
+    for mut text in &mut labels {
+        if text.0 != wanted {
+            wanted.clone_into(&mut text.0);
+        }
+    }
     let shown = controls.shown && in_play(screen);
     for mut visibility in &mut overlays {
         visibility.set_if_neq(if shown {
@@ -497,9 +613,131 @@ mod tests {
         touch(&mut app, 1, TouchPhase::Moved, Vec2::new(700.0, 650.0));
         assert!(!keys(&app).pressed(KeyCode::KeyQ));
         assert!(keys(&app).pressed(KeyCode::KeyE));
+        // Lifted after a slide, it stays parked.
         touch(&mut app, 1, TouchPhase::Ended, Vec2::new(700.0, 650.0));
-        assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
+        assert!(keys(&app).pressed(KeyCode::ShiftLeft));
         assert!(!keys(&app).pressed(KeyCode::KeyE));
+        assert!(app.world().resource::<TouchControls>().locked);
+
+        // Sliding again while locked leaves it locked.
+        touch(&mut app, 2, TouchPhase::Started, Vec2::new(700.0, 600.0));
+        touch(&mut app, 2, TouchPhase::Moved, Vec2::new(700.0, 500.0));
+        assert!(keys(&app).pressed(KeyCode::KeyQ));
+        touch(&mut app, 2, TouchPhase::Ended, Vec2::new(700.0, 500.0));
+        assert!(app.world().resource::<TouchControls>().locked);
+        assert!(keys(&app).pressed(KeyCode::ShiftLeft));
+        assert!(!keys(&app).pressed(KeyCode::KeyQ));
+    }
+
+    fn hold(app: &mut App) {
+        let hold = TouchButton::new(KeyCode::ShiftLeft).sliding(KeyCode::KeyQ, KeyCode::KeyE);
+        spawn_button(app, hold, Vec2::new(700.0, 600.0));
+    }
+
+    fn tap(app: &mut App, id: u64, position: Vec2) {
+        touch(app, id, TouchPhase::Started, position);
+        touch(app, id, TouchPhase::Ended, position);
+    }
+
+    fn locked(app: &App) -> bool {
+        app.world().resource::<TouchControls>().locked
+    }
+
+    /// The hold label's text and the colour of the buttons holding Shift.
+    fn hold_looks(app: &mut App) -> (String, Vec<Color>) {
+        let world = app.world_mut();
+        let text = world
+            .query_filtered::<&Text, With<HoldLabel>>()
+            .single(world)
+            .unwrap()
+            .0
+            .clone();
+        let colours = world
+            .query::<(&TouchButton, &BackgroundColor)>()
+            .iter(world)
+            .filter(|(button, _)| button.key == KeyCode::ShiftLeft)
+            .map(|(_, colour)| colour.0)
+            .collect();
+        (text, colours)
+    }
+
+    #[test]
+    fn tapping_hold_locks_the_prism_until_tapped_again() {
+        let mut app = app();
+        hold(&mut app);
+        let spot = Vec2::new(705.0, 595.0);
+        touch(&mut app, 1, TouchPhase::Started, spot);
+        assert!(keys(&app).just_pressed(KeyCode::ShiftLeft));
+        assert!(!locked(&app));
+        touch(&mut app, 1, TouchPhase::Ended, spot);
+        assert!(locked(&app));
+        assert!(keys(&app).pressed(KeyCode::ShiftLeft));
+        app.update();
+        assert!(keys(&app).pressed(KeyCode::ShiftLeft));
+        let (text, colours) = hold_looks(&mut app);
+        assert_eq!(text, HELD_TEXT);
+        assert!(colours.iter().all(|&colour| colour == PRESSED_COLOUR));
+
+        // Another finger on fire doesn't touch the lock.
+        spawn_button(
+            &mut app,
+            TouchButton::new(KeyCode::Space),
+            Vec2::new(700.0, 400.0),
+        );
+        tap(&mut app, 2, Vec2::new(700.0, 400.0));
+        assert!(locked(&app));
+
+        // A second tap holds while down, then unlocks when lifted.
+        touch(&mut app, 3, TouchPhase::Started, spot);
+        assert!(keys(&app).pressed(KeyCode::ShiftLeft));
+        assert!(locked(&app));
+        touch(&mut app, 3, TouchPhase::Ended, spot);
+        assert!(!locked(&app));
+        assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
+        let (text, colours) = hold_looks(&mut app);
+        assert_eq!(text, HOLD_TEXT);
+        assert!(colours.iter().all(|&colour| colour == BUTTON_COLOUR));
+
+        // A cancelled touch isn't a tap.
+        touch(&mut app, 4, TouchPhase::Started, spot);
+        touch(&mut app, 4, TouchPhase::Canceled, spot);
+        assert!(!locked(&app));
+        assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
+    }
+
+    #[test]
+    fn leaving_play_unlocks_hold() {
+        let mut app = app();
+        hold(&mut app);
+        tap(&mut app, 1, Vec2::new(700.0, 600.0));
+        assert!(locked(&app));
+        app.world_mut()
+            .resource_mut::<NextState<Screen>>()
+            .set(Screen::GameOver);
+        app.update();
+        app.update();
+        assert!(!locked(&app));
+        assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
+    }
+
+    #[test]
+    fn a_key_press_unlocks_hold() {
+        let mut app = app();
+        hold(&mut app);
+        tap(&mut app, 1, Vec2::new(700.0, 600.0));
+        assert!(locked(&app));
+        app.world_mut().write_message(KeyboardInput {
+            key_code: KeyCode::ArrowLeft,
+            logical_key: bevy::input::keyboard::Key::ArrowLeft,
+            state: bevy::input::ButtonState::Pressed,
+            text: None,
+            repeat: false,
+            window: Entity::PLACEHOLDER,
+        });
+        app.update();
+        assert!(!app.world().resource::<TouchControls>().shown);
+        assert!(!locked(&app));
+        assert!(!keys(&app).pressed(KeyCode::ShiftLeft));
     }
 
     #[test]
