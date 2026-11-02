@@ -2,23 +2,31 @@
 //!
 //! Pausing stops the game clock, so the fixed-step simulation and anything
 //! timed by `Time` hold still until P is pressed again. Play inputs are
-//! ignored meanwhile, so nothing changes on resume.
+//! ignored meanwhile, so nothing changes on resume. Menu screens stop the
+//! clock the same way, and P does nothing while one shows.
 
 use bevy::prelude::*;
+
+use crate::screens::{Screen, in_play};
 
 #[derive(Debug, Default)]
 pub struct PausePlugin;
 
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, toggle_pause.after(bevy::input::InputSystems));
+        app.add_systems(
+            PreUpdate,
+            toggle_pause
+                .after(bevy::input::InputSystems)
+                .run_if(in_play),
+        );
     }
 }
 
-/// Run condition for play inputs: true unless the game is paused.
+/// Run condition for play inputs: true while playing, unless paused.
 #[must_use]
-pub fn running(time: Res<Time<Virtual>>) -> bool {
-    !time.is_paused()
+pub fn running(time: Res<Time<Virtual>>, screen: Option<Res<State<Screen>>>) -> bool {
+    !time.is_paused() && in_play(screen)
 }
 
 fn toggle_pause(
@@ -67,10 +75,12 @@ pub fn spawn_overlay(mut commands: Commands) {
 
 pub fn show_overlay(
     time: Res<Time<Virtual>>,
+    screen: Option<Res<State<Screen>>>,
     mut overlays: Query<&mut Visibility, With<PauseOverlay>>,
 ) {
+    let shown = time.is_paused() && in_play(screen);
     for mut visibility in &mut overlays {
-        visibility.set_if_neq(if time.is_paused() {
+        visibility.set_if_neq(if shown {
             Visibility::Inherited
         } else {
             Visibility::Hidden

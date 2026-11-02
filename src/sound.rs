@@ -282,6 +282,8 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
             vec![Cue::new(SoundId::InvulnerabilityEnd).at(at)]
         }
         GameEvent::RoomReset => vec![Cue::new(SoundId::RoomReset)],
+        // The life lost and the level completed already sound.
+        GameEvent::OutOfLives | GameEvent::CampaignFinished => Vec::new(),
         GameEvent::PickupDropped { at, .. } => vec![Cue::new(SoundId::PickupAppear).at(at)],
         GameEvent::PickupCollected { power, at } => vec![
             Cue::new(SoundId::PickupCollect)

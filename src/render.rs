@@ -21,6 +21,7 @@ use crate::light::{Colour, Hidden, Primary};
 use crate::physics::{BounceTuning, Traits};
 use crate::powerup::{Abilities, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{Prism, PrismFrozen};
+use crate::screens::{Screen, in_play};
 use std::f32::consts::FRAC_PI_2;
 
 /// Vertical extent of the view in world units, regardless of window size.
@@ -871,8 +872,11 @@ fn spin_hero_visual(
 }
 
 /// The camera eases towards the hero on both axes, kept inside the room.
+/// The camera eases after the hero in play, and goes straight to it behind
+/// a menu, where the stopped clock would leave it wherever it was.
 fn follow_hero(
     time: Res<Time>,
+    screen: Option<Res<State<Screen>>>,
     bounds: Option<Res<RoomBounds>>,
     heroes: Query<&Transform, With<Hero>>,
     mut cameras: Query<(&mut Transform, &Projection), (With<MainCamera>, Without<Hero>)>,
@@ -882,6 +886,11 @@ fn follow_hero(
         return;
     };
     let hero = hero.translation.truncate();
+    let blend = if in_play(screen) {
+        1.0 - (-CAMERA_FOLLOW_RATE * time.delta_secs()).exp()
+    } else {
+        1.0
+    };
     for (mut transform, projection) in &mut cameras {
         let half = match projection {
             Projection::Orthographic(ortho) => ortho.area.size() / 2.0,
@@ -891,7 +900,6 @@ fn follow_hero(
             camera_target(hero.x, half.x, bounds.0.min.x, bounds.0.max.x),
             camera_target(hero.y, half.y, bounds.0.min.y, bounds.0.max.y),
         );
-        let blend = 1.0 - (-CAMERA_FOLLOW_RATE * time.delta_secs()).exp();
         let current = transform.translation.truncate();
         let next = current + (target - current) * blend;
         transform.translation.x = next.x;
