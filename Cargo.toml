@@ -13,14 +13,24 @@ publish = false
 dev = ["dep:bevy_egui"]
 
 [dependencies]
-# `wav` decodes the generated sound effects.
-bevy = { version = "0.20.1", features = ["wav"] }
+# A 2D game: the 3D renderer and Ogg support are left out, which also keeps
+# the web build small. `wav` decodes the generated sound effects and music.
+bevy = { version = "0.20.1", default-features = false, features = [
+    "2d",
+    "ui",
+    "bevy_audio",
+    "wav",
+] }
 bevy_egui = { version = "0.43.1", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 # `noise` and `png` paint and write the generated art (`just art`).
 noise = "0.9.0"
 png = "0.18.1"
+
+# The browser has no `std::time` clock.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-time = "1.1.0"
 
 [build-dependencies]
 toml = "1.1.8"
@@ -63,3 +73,11 @@ lto = "thin"
 codegen-units = 1
 # Drop symbols and debug info from shipped binaries.
 strip = true
+
+# The web build: optimised for size, as the whole game is downloaded before
+# it starts.
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = "fat"
+panic = "abort"
