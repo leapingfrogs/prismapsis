@@ -380,8 +380,9 @@ mod tests {
         }
     }
 
-    /// How far each theme tileset's art has been told colour is restored.
-    fn washes(app: &App) -> Vec<Vec4> {
+    /// How far each theme tileset's art has been told colour is restored;
+    /// `w`, how strongly it takes light, is left out.
+    fn washes(app: &App) -> Vec<Vec3> {
         let materials = app
             .world()
             .resource::<Assets<crate::art::tiles::WorldMaterial>>();
@@ -390,7 +391,7 @@ mod tests {
             .0
             .iter()
             .flatten()
-            .filter_map(|handle| materials.get(handle).map(|m| m.wash))
+            .filter_map(|handle| materials.get(handle).map(|m| m.wash.truncate()))
             .collect()
     }
 
@@ -401,7 +402,7 @@ mod tests {
         let tilesets = 4 * crate::art::paint::themes().len();
         assert_eq!(
             washes(&app),
-            vec![Vec4::ZERO; tilesets],
+            vec![Vec3::ZERO; tilesets],
             "walls and scenery"
         );
         for primary in Primary::ALL {
@@ -414,7 +415,7 @@ mod tests {
         assert!(partway > 0.0 && partway < 1.0, "should flood in gradually");
         run(&mut app, 200);
         assert_eq!(app.world().resource::<Wash>().0, [1.0; 3]);
-        assert_eq!(washes(&app), vec![Vec4::new(1.0, 1.0, 1.0, 0.0); tilesets]);
+        assert_eq!(washes(&app), vec![Vec3::ONE; tilesets]);
         let restored = crate::art::tiles::background(0, [1.0; 3]);
         assert_eq!(app.world().resource::<ClearColor>().0, restored);
     }

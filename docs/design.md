@@ -562,6 +562,15 @@ output is committed; the game only ever loads level files.
     top and icicles hanging underneath; blue and violet crystal; frosted
     windows with ferns of frost, a snowflake, a clear patch or a crack;
     and a deep night blue.
+- **Light falls on the world.** The world shader takes up to eight lights
+  a frame, each a segment (a point when its ends meet) with a colour and
+  a reach: each piece of the beam along its length in its colour, a soft
+  glow round the hero, the open exit, the nearest lit checkpoint lamp, and
+  the nearest motes in theirs. A surface near a light is brightened in
+  the light's colour after the colour filter, so a red beam tints rock
+  that is still grey, and even dark surfaces lift a little; nothing is lit
+  past white, so walls catch light rather than glow. Walls and features
+  take it fully, scenery panels half and the far backdrop only a tenth.
 - **Backdrops** are two layers behind each theme's level, painted by the
   `art` tool to tile in every direction at a quarter of the walls'
   resolution, and drawn through the same colour filter, so they start grey

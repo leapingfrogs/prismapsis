@@ -40,6 +40,8 @@ pub struct PresentationPlugin;
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BeamView>()
+            .init_resource::<BeamPieces>()
+            .add_systems(Update, gather_lights.after(draw_beam))
             .init_resource::<BloomOn>()
             .add_systems(
                 Startup,
@@ -407,6 +409,109 @@ pub const fn beam_colour(colour: BeamColour) -> Color {
     }
 }
 
+/// The drawn beam's pieces this frame, which light the walls.
+#[derive(Resource, Debug, Default, Clone, PartialEq)]
+pub struct BeamPieces(pub Vec<crate::beam::BeamPiece>);
+
+/// How far light from each source reaches (world units), and how strong
+/// it is: the hero's soft glow, the beam, the open exit, a lit
+/// checkpoint's lamp and a mote.
+const HERO_LIGHT: (f32, f32) = (260.0, 0.3);
+const BEAM_LIGHT_REACH: f32 = 200.0;
+const BEAM_LIGHT_STRENGTH: f32 = 1.3;
+const EXIT_LIGHT_REACH: (f32, f32) = (380.0, 0.9);
+const LAMP_LIGHT: (f32, f32) = (220.0, 0.6);
+const MOTE_LIGHT_REACH: (f32, f32) = (150.0, 0.6);
+
+/// Beam pieces that light the walls at most, so other lights still fit.
+const BEAM_LIGHTS: usize = 4;
+
+/// How far from the hero a lamp or mote can be and still light the view.
+const LIGHT_RANGE: f32 = 900.0;
+
+/// A colour as the shader takes it: linear, times `strength`.
+fn light_colour(colour: Color, strength: f32) -> Vec3 {
+    let linear = colour.to_linear();
+    Vec3::new(linear.red, linear.green, linear.blue) * strength
+}
+
+/// Gather the lights shining on the world this frame, most important
+/// first: the beam, the hero, the open exit, the nearest lit checkpoint,
+/// then the nearest motes.
+#[allow(clippy::type_complexity)]
+fn gather_lights(
+    pieces: Res<BeamPieces>,
+    wash: Res<crate::spectrum_view::Wash>,
+    mut world_lights: ResMut<crate::art::tiles::WorldLights>,
+    heroes: Query<&Transform, With<Hero>>,
+    exits: Query<&crate::light::ExitGate>,
+    checkpoints: Query<&Checkpoint>,
+    motes: Query<(&Transform, &Enemy, &Colour), Without<Hero>>,
+) {
+    use crate::art::tiles::WorldLight;
+    let point = |at: Vec2, colour: Vec3, radius: f32| WorldLight {
+        from: at,
+        to: at,
+        colour,
+        radius,
+    };
+    let mut lights: Vec<WorldLight> = pieces
+        .0
+        .iter()
+        .take(BEAM_LIGHTS)
+        .map(|&(from, to, colour)| WorldLight {
+            from,
+            to,
+            colour: light_colour(beam_colour(colour), BEAM_LIGHT_STRENGTH),
+            radius: BEAM_LIGHT_REACH,
+        })
+        .collect();
+    let hero = heroes.single().ok().map(|t| t.translation.truncate());
+    if let Some(at) = hero {
+        lights.push(point(at, Vec3::splat(HERO_LIGHT.1), HERO_LIGHT.0));
+    }
+    let open = wash.of(crate::light::Hue::White);
+    if open > 0.0 {
+        for exit in &exits {
+            let (reach, strength) = EXIT_LIGHT_REACH;
+            lights.push(point(exit.0.center(), Vec3::splat(strength * open), reach));
+        }
+    }
+    let near = |at: Vec2| hero.map_or(0.0, |h| h.distance(at));
+    let lamp = checkpoints
+        .iter()
+        .filter(|c| c.active)
+        .map(|c| Vec2::new(c.aabb.center().x, c.aabb.max.y - 20.0))
+        .filter(|&at| near(at) < LIGHT_RANGE)
+        .min_by(|a, b| near(*a).total_cmp(&near(*b)));
+    if let Some(at) = lamp {
+        lights.push(point(
+            at,
+            Vec3::new(0.55, 0.7, 0.9) * LAMP_LIGHT.1,
+            LAMP_LIGHT.0,
+        ));
+    }
+    let mut nearby: Vec<(f32, Vec2, Primary)> = motes
+        .iter()
+        .filter(|(_, enemy, _)| enemy.kind == EnemyKind::Mote)
+        .map(|(t, _, colour)| {
+            let at = t.translation.truncate();
+            (near(at), at, colour.0)
+        })
+        .filter(|&(distance, ..)| distance < LIGHT_RANGE)
+        .collect();
+    nearby.sort_by(|a, b| a.0.total_cmp(&b.0));
+    for (_, at, colour) in nearby {
+        let (reach, strength) = MOTE_LIGHT_REACH;
+        let hue = crate::spectrum_view::hue_colour(colour.into());
+        lights.push(point(at, light_colour(hue, strength), reach));
+    }
+    lights.truncate(crate::art::tiles::MAX_LIGHTS);
+    if world_lights.0 != lights {
+        world_lights.0 = lights;
+    }
+}
+
 /// What the drawn beam looks like this frame, for other presentation
 /// (such as sound) to follow.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -503,6 +608,7 @@ fn draw_beam(
     powerups: Res<PowerUpTuning>,
     beam_materials: Option<Res<BeamMaterials>>,
     mut view: ResMut<BeamView>,
+    mut pieces: ResMut<BeamPieces>,
     heroes: Query<(&Transform, &Facing), (With<Hero>, Without<BeamVisual>)>,
     prisms: Query<&Transform, (With<Prism>, Without<Hero>, Without<BeamVisual>)>,
     solids: Query<(&Solid, Option<&Traits>)>,
@@ -543,6 +649,9 @@ fn draw_beam(
     let split = trace.segments.iter().any(|s| s.2 != BeamColour::White);
     if view.split != split {
         view.split = split;
+    }
+    if pieces.0 != trace.segments {
+        pieces.0.clone_from(&trace.segments);
     }
     for (visual, children, mut transform, mut visibility, mut material) in &mut visuals {
         let Some(&(start, end, colour)) = trace.segments.get(visual.0) else {
@@ -1448,5 +1557,32 @@ mod tests {
         let bounds = world.resource::<RoomBounds>().0;
         assert!(camera.translation.x >= bounds.min.x && camera.translation.x <= bounds.max.x);
         assert!(camera.translation.y >= bounds.min.y && camera.translation.y <= bounds.max.y);
+    }
+
+    #[test]
+    fn the_hero_lights_the_world_and_the_beam_adds_its_pieces() {
+        let mut app = presentation_app();
+        app.update();
+        app.update();
+        let lights = |app: &App| {
+            app.world()
+                .resource::<crate::art::tiles::WorldLights>()
+                .0
+                .clone()
+        };
+        let idle = lights(&app);
+        assert_eq!(idle.len(), 1, "the hero's glow");
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        for _ in 0..5 {
+            app.update();
+        }
+        let firing = lights(&app);
+        assert!(firing.len() > idle.len(), "{firing:?}");
+        assert!(
+            firing[0].from != firing[0].to,
+            "a beam lights along its length"
+        );
     }
 }
