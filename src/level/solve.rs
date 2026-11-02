@@ -246,6 +246,21 @@ fn nearby(solids: &[Surface], x: f32) -> Vec<Surface> {
         .collect()
 }
 
+/// Whether a hero at `at` has landed on top of `aabb`.
+fn landed_on(at: Vec2, aabb: &Aabb) -> bool {
+    (at.y - HERO_RADIUS - aabb.max.y).abs() < 1.5
+        && at.x + HERO_RADIUS > aabb.min.x
+        && at.x - HERO_RADIUS < aabb.max.x
+}
+
+/// The crumbling platform a hero at `at` has landed on, if any.
+fn crumbling_under(solids: &[Surface], at: Vec2) -> Option<Aabb> {
+    solids
+        .iter()
+        .find(|s| s.traits.crumble > 0 && landed_on(at, &s.aabb))
+        .map(|s| s.aabb)
+}
+
 /// The solids that block the hero from every side, and their boxes.
 fn blocking(solids: &[Surface]) -> impl Iterator<Item = &Aabb> {
     solids.iter().filter(|s| !s.traits.one_way).map(|s| &s.aabb)
@@ -289,18 +304,29 @@ impl<'a> World<'a> {
         }
     }
 
-    /// Walls, and the phantoms whose hue is restored.
-    fn solids(&self, restored: Restored) -> Vec<Surface> {
+    /// Walls but the blocks broken so far, the phantoms whose hue is
+    /// restored, and moving platforms standing still at each tile along
+    /// their tracks: the hero can wait for one to come round.
+    fn solids(&self, restored: Restored, broken: &[bool]) -> Vec<Surface> {
+        let tile = self.level.tile;
         self.level
             .walls
             .iter()
-            .map(|&(aabb, _, traits)| Surface { aabb, traits })
+            .zip(broken)
+            .filter(|&(_, &broken)| !broken)
+            .map(|(&(aabb, _, traits), _)| Surface::still(aabb, traits))
+            .chain(self.level.movers.iter().flat_map(|mover| {
+                mover
+                    .stops(tile)
+                    .into_iter()
+                    .map(|aabb| Surface::still(aabb, mover.traits))
+            }))
             .chain(
                 self.level
                     .phantoms
                     .iter()
                     .filter(|&&(_, hue, _)| is_restored(hue, restored))
-                    .map(|&(aabb, _, traits)| Surface { aabb, traits }),
+                    .map(|&(aabb, _, traits)| Surface::still(aabb, traits)),
             )
             .collect()
     }
@@ -384,8 +410,8 @@ impl<'a> World<'a> {
 
     /// Everywhere a bouncing hero can land from `seeds`, where it starts
     /// falling from rest.
-    fn bounce(&self, restored: Restored, seeds: &[Vec2], out: &mut Explored) {
-        let solids = self.solids(restored);
+    fn bounce(&self, restored: Restored, broken: &[bool], seeds: &[Vec2], out: &mut Explored) {
+        let solids = self.solids(restored, broken);
         let boxes: Vec<Aabb> = solids.iter().map(|s| s.aabb).collect();
         let key = |at| Self::key(false, at);
         let mut queue = VecDeque::new();
@@ -404,10 +430,14 @@ impl<'a> World<'a> {
         }
         while let Some((from, launch)) = queue.pop_front() {
             out.places.push(from);
+            // A crumbling platform may give way under a second landing in a
+            // row, so the search never counts on one.
+            let crumbling = crumbling_under(&solids, from);
             for spin in -self.max_spin..=self.max_spin {
                 let vel = Vec2::new(self.bounce.horizontal_speed(spin), launch);
                 if let Some((landing, launch)) =
                     self.arc(from, vel, spin, restored, &solids, &boxes, out)
+                    && crumbling.is_none_or(|aabb| !landed_on(landing, &aabb))
                     && out.keys.insert(key(landing))
                 {
                     queue.push_back((landing, launch));
@@ -418,8 +448,8 @@ impl<'a> World<'a> {
 
     /// Everywhere open a hovering hero can move to from `seeds`. It rises
     /// through one-way solids but can't move down into one from above.
-    fn hover(&self, restored: Restored, seeds: &[Vec2], out: &mut Explored) {
-        let solids = self.solids(restored);
+    fn hover(&self, restored: Restored, broken: &[bool], seeds: &[Vec2], out: &mut Explored) {
+        let solids = self.solids(restored, broken);
         let boxes: Vec<Aabb> = solids.iter().map(|s| s.aabb).collect();
         let size = self.level.size;
         // Bounded by the level's size, so the casts cannot truncate.
@@ -510,18 +540,58 @@ impl<'a> World<'a> {
         (phantoms, pickups, state.hovering)
     }
 
+    /// Everything reachable from `seeds` in `state`. Breakable blocks start
+    /// whole; any the hero can shoot from where it reaches break, and the
+    /// search runs again without them until no more break.
     fn explore(&self, state: State, seeds: &[Vec2]) -> Explored {
-        let mut out = Explored {
-            checkpoints: vec![false; self.level.checkpoints.len()],
-            lenses: vec![false; self.level.lenses.len()],
-            ..Explored::default()
-        };
-        if state.hovering {
-            self.hover(state.restored, seeds, &mut out);
-        } else {
-            self.bounce(state.restored, seeds, &mut out);
+        let mut broken = vec![false; self.level.walls.len()];
+        loop {
+            let mut out = Explored {
+                checkpoints: vec![false; self.level.checkpoints.len()],
+                lenses: vec![false; self.level.lenses.len()],
+                ..Explored::default()
+            };
+            if state.hovering {
+                self.hover(state.restored, &broken, seeds, &mut out);
+            } else {
+                self.bounce(state.restored, &broken, seeds, &mut out);
+            }
+            let newly = self.shootable_blocks(state.restored, &broken, &out);
+            if newly.is_empty() {
+                return out;
+            }
+            for i in newly {
+                broken[i] = true;
+            }
         }
-        out
+    }
+
+    /// The whole breakable blocks the hero can shoot from where it reaches,
+    /// by index into the walls: in the beam's reach and sight through the
+    /// prism, with nothing else in the way.
+    fn shootable_blocks(&self, restored: Restored, broken: &[bool], out: &Explored) -> Vec<usize> {
+        let solids = self.solids(restored, broken);
+        let walls = &self.level.walls;
+        (0..walls.len())
+            .filter(|&i| !broken[i] && walls[i].2.breakable.is_some())
+            .filter(|&i| {
+                let block = walls[i].0;
+                let others: Vec<Aabb> = solids
+                    .iter()
+                    .map(|s| s.aabb)
+                    .filter(|aabb| *aabb != block)
+                    .collect();
+                let centre = block.center();
+                let reach = block.size().y / 2.0;
+                out.places.iter().step_by(SIGHT_EVERY).any(|&at| {
+                    let span = centre - at;
+                    span.length() <= MAX_BEAM_LENGTH
+                        && span.y.abs()
+                            <= span.x.abs() * self.sight_slope + self.sight_offset + reach
+                        && line_of_sight(at, centre, &others)
+                })
+            })
+            .collect()
     }
 
     /// Light for `primary` from the lenses the hero can shoot.
@@ -891,5 +961,49 @@ mod tests {
             solution.to_string(),
             "restore blue, red, green, using anti-gravity; 2 checkpoints are out of reach"
         );
+    }
+
+    #[test]
+    fn a_block_the_hero_can_shoot_breaks_open_the_way() {
+        let gate = |ch: char| {
+            format!(
+                "##############\n#      {ch}     #\n#      {ch}     #\n#      {ch}    X#\n#  @   {ch}     #\n##############\n"
+            )
+        };
+        let breakable = "[legend]\n\"!\" = { wall = \"grey\", breakable = \"red\" }\n";
+        assert!(solve(&level(&gate('!'), breakable)).is_ok());
+        assert_eq!(
+            solve(&level(&gate('#'), "")),
+            Err(Unsolvable::ExitOutOfReach)
+        );
+    }
+
+    #[test]
+    fn crumbling_and_moving_platforms_serve_as_steps() {
+        let step = |row: &str| {
+            HIGH.replacen(
+                "#            #\n#            #\n#            #\n#  @",
+                &format!("{row}\n#            #\n#            #\n#  @"),
+                1,
+            )
+        };
+        assert!(solve(&level(&step("#     :::    #"), "")).is_ok());
+        assert!(solve(&level(&step("#  ---___--  #"), "")).is_ok());
+    }
+
+    #[test]
+    fn the_search_never_lands_twice_in_a_row_on_a_crumbling_platform() {
+        let platform = Surface::still(
+            Aabb::new(Vec2::new(0.0, 0.0), Vec2::new(120.0, 10.0)),
+            physics::Traits {
+                crumble: 1,
+                ..physics::Traits::default()
+            },
+        );
+        let on_top = Vec2::new(60.0, 10.0 + HERO_RADIUS);
+        assert_eq!(crumbling_under(&[platform], on_top), Some(platform.aabb));
+        assert_eq!(crumbling_under(&[platform], on_top + Vec2::Y * 50.0), None);
+        let plain = Surface::still(platform.aabb, physics::Traits::default());
+        assert_eq!(crumbling_under(&[plain], on_top), None);
     }
 }

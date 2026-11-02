@@ -22,6 +22,7 @@ pub mod light;
 pub mod music;
 pub mod pause;
 pub mod physics;
+pub mod platforms;
 pub mod powerup;
 pub mod prism;
 pub mod render;
@@ -114,6 +115,7 @@ impl Plugin for SimulationPlugin {
                 enemy::EnemyPlugin,
                 powerup::PowerUpPlugin,
                 light::LightPlugin,
+                platforms::PlatformsPlugin,
             ));
     }
 }

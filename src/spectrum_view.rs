@@ -95,7 +95,12 @@ pub struct PhantomLook {
 /// tinted with its hue.
 fn phantom_mesh(phantom: &Phantom, tile: f32, solid: bool) -> Mesh {
     let [r, g, b, _] = hue_colour(phantom.hue).to_linear().to_f32_array();
-    crate::art::phantoms::mesh(&phantom.aabb, tile, solid, [r, g, b])
+    let glass = if solid {
+        crate::art::phantoms::Glass::Crystal
+    } else {
+        crate::art::phantoms::Glass::Ghost
+    };
+    crate::art::phantoms::mesh(&phantom.aabb, tile, glass, [r, g, b])
 }
 
 /// Phantoms are drawn from the phantom tileset, one mesh each.

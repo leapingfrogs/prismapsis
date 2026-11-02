@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use crate::events::GameEvent;
 use crate::level::{CurrentLevel, Solid};
 use crate::physics::{self, Body, BounceTuning, Surface, Traits};
+use crate::platforms::PlatformVelocity;
 use crate::powerup::{Abilities, PowerUp};
 
 /// Collision half-size of the hero, in world units.
@@ -135,7 +136,7 @@ pub fn move_hero(
     abilities: Res<Abilities>,
     hover: Res<HoverInput>,
     mut events: MessageWriter<GameEvent>,
-    solids: Query<(&Solid, Option<&Traits>)>,
+    solids: Query<(&Solid, Option<&Traits>, Option<&PlatformVelocity>)>,
     mut heroes: Query<
         (
             &mut Position,
@@ -148,9 +149,10 @@ pub fn move_hero(
 ) {
     let solids: Vec<Surface> = solids
         .iter()
-        .map(|(solid, traits)| Surface {
+        .map(|(solid, traits, velocity)| Surface {
             aabb: solid.0,
             traits: traits.copied().unwrap_or_default(),
+            velocity: velocity.map_or(Vec2::ZERO, |v| v.0),
         })
         .collect();
     for (mut pos, mut prev, mut vel, mut spin) in &mut heroes {

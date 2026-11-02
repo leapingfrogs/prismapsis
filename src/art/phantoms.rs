@@ -7,6 +7,9 @@
 //! the walls. Like features, phantoms are drawn one quad per cell, and a
 //! cell's tile depends on which of its neighbours belong to the same
 //! phantom, so the rim and bevel only run round the outside.
+//!
+//! Breakable blocks use the same crystal, fractured with cracks, as they
+//! too always show their colour.
 
 use super::TILE_PX;
 use super::features::{ABOVE, BELOW, LEFT, RIGHT};
@@ -15,9 +18,23 @@ use crate::physics::Aabb;
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 
-/// Layers in the phantom tileset: 16 neighbour masks while waiting, then
-/// 16 once solid.
-pub const PHANTOM_LAYERS: u16 = 32;
+/// How a cell of glass looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Glass {
+    /// A phantom waiting for its hue.
+    Ghost,
+    /// A phantom once solid.
+    Crystal,
+    /// A breakable block: crystal with cracks running through it.
+    Cracked,
+}
+
+impl Glass {
+    pub const ALL: [Self; 3] = [Self::Ghost, Self::Crystal, Self::Cracked];
+}
+
+/// Layers in the phantom tileset: 16 neighbour masks for each look.
+pub const PHANTOM_LAYERS: u16 = 48;
 
 /// The phantom tileset's path under the assets folder.
 pub const TILESET_PATH: &str = "art/phantoms.png";
@@ -25,27 +42,28 @@ pub const TILESET_PATH: &str = "art/phantoms.png";
 #[allow(clippy::cast_precision_loss)]
 const SIZE: f32 = TILE_PX as f32;
 
-/// The tileset layer for a phantom cell with neighbours `mask`.
+/// The tileset layer for a cell of `glass` with neighbours `mask`.
 #[must_use]
-pub fn layer(solid: bool, mask: u8) -> u16 {
-    u16::from(solid) * 16 + u16::from(mask & 15)
+pub fn layer(glass: Glass, mask: u8) -> u16 {
+    let index = Glass::ALL.iter().position(|&g| g == glass).unwrap_or(0);
+    u16::try_from(index).unwrap_or(0) * 16 + u16::from(mask & 15)
 }
 
 /// Every tile stacked top to bottom, in layer order.
 #[must_use]
 pub fn tileset() -> Canvas {
     let mut canvas = Canvas::new(TILE_PX, TILE_PX * u32::from(PHANTOM_LAYERS));
-    for solid in [false, true] {
+    for glass in Glass::ALL {
         for mask in 0..16 {
-            let top = u32::from(layer(solid, mask)) * TILE_PX;
+            let top = u32::from(layer(glass, mask)) * TILE_PX;
             for y in 0..TILE_PX {
                 for x in 0..TILE_PX {
                     #[allow(clippy::cast_precision_loss)]
                     let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let pixel = if solid {
-                        crystal(px, py, mask)
-                    } else {
-                        ghost(px, py, mask)
+                    let pixel = match glass {
+                        Glass::Ghost => ghost(px, py, mask),
+                        Glass::Crystal => crystal(px, py, mask),
+                        Glass::Cracked => cracked(px, py, mask),
                     };
                     canvas.set(x, top + y, pixel);
                 }
@@ -164,6 +182,34 @@ fn crystal(x: f32, y: f32, mask: u8) -> [f32; 4] {
     grey(value.min(1.0), 0.94)
 }
 
+/// Crystal broken by cracks: a few dark lines branching across each cell
+/// from a point off its centre, lit along one edge.
+fn cracked(x: f32, y: f32, mask: u8) -> [f32; 4] {
+    let [value, _, _, alpha] = crystal(x, y, mask);
+    if alpha <= 0.0 {
+        return grey(value, alpha);
+    }
+    let origin = (SIZE * 0.42, SIZE * 0.55);
+    let (dx, dy) = (x - origin.0, y - origin.1);
+    let angle = dy.atan2(dx);
+    let r = dx.hypot(dy);
+    // Five crooked rays, and a ring partway out.
+    let mut crack = f32::MAX;
+    for k in 0..5u8 {
+        let a = f32::from(k) * 1.3 + 0.4;
+        let wobble = (r * 0.25 + f32::from(k)).sin() * 0.08;
+        let off = (angle - a - wobble).sin().abs() * r;
+        if (angle - a - wobble).cos() > 0.0 {
+            crack = crack.min(off);
+        }
+    }
+    crack = crack.min((r - SIZE * 0.22).abs() + 2.0 * ((angle * 3.0).sin().abs()));
+    let line = 1.0 - smoothstep(0.6, 1.4, crack);
+    let lit = 1.0 - smoothstep(1.4, 2.4, (crack - 1.6).abs());
+    let shade = (value * (1.0 - 0.75 * line) + 0.25 * lit * (1.0 - line)).min(1.0);
+    grey(shade, alpha)
+}
+
 /// A mesh for one phantom covering `aabb`, a quad per cell of `tile` from
 /// its top-left corner.
 ///
@@ -171,7 +217,7 @@ fn crystal(x: f32, y: f32, mask: u8) -> [f32; 4] {
 /// matching part of its tile. Each corner carries `tint` (linear), with the
 /// tileset layer in the alpha channel.
 #[must_use]
-pub fn mesh(aabb: &Aabb, tile: f32, solid: bool, tint: [f32; 3]) -> Mesh {
+pub fn mesh(aabb: &Aabb, tile: f32, glass: Glass, tint: [f32; 3]) -> Mesh {
     let size = aabb.size();
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     let count = |length: f32| ((length / tile).ceil() as u32).max(1);
@@ -194,7 +240,7 @@ pub fn mesh(aabb: &Aabb, tile: f32, solid: bool, tint: [f32; 3]) -> Mesh {
             if col + 1 < cols {
                 mask |= RIGHT;
             }
-            let layer = f32::from(layer(solid, mask));
+            let layer = f32::from(layer(glass, mask));
             #[allow(clippy::cast_precision_loss)]
             let (left, top) = (
                 aabb.min.x + col as f32 * tile,
@@ -253,7 +299,7 @@ mod tests {
     #[test]
     fn a_phantom_has_a_quad_per_cell_with_its_layers() {
         let aabb = Aabb::new(Vec2::new(40.0, 0.0), Vec2::new(120.0, 120.0));
-        let mesh = mesh(&aabb, 40.0, true, [1.0, 0.0, 0.0]);
+        let mesh = mesh(&aabb, 40.0, Glass::Crystal, [1.0, 0.0, 0.0]);
         assert_eq!(mesh.count_vertices(), 2 * 3 * 4);
         let Some(VertexAttributeValues::Float32x4(colours)) = mesh.attribute(Mesh::ATTRIBUTE_COLOR)
         else {
@@ -261,14 +307,14 @@ mod tests {
         };
         // The top-left cell is open above and to the left, solid art.
         let first = colours[0][3];
-        assert!((first - f32::from(layer(true, BELOW | RIGHT))).abs() < f32::EPSILON);
-        assert!(colours.iter().all(|c| c[3] >= 16.0));
+        assert!((first - f32::from(layer(Glass::Crystal, BELOW | RIGHT))).abs() < f32::EPSILON);
+        assert!(colours.iter().all(|c| (16.0..32.0).contains(&c[3])));
     }
 
     #[test]
     fn a_thin_phantom_shows_the_top_of_its_tile() {
         let aabb = Aabb::new(Vec2::ZERO, Vec2::new(40.0, 10.0));
-        let mesh = mesh(&aabb, 40.0, false, [1.0; 3]);
+        let mesh = mesh(&aabb, 40.0, Glass::Ghost, [1.0; 3]);
         let Some(VertexAttributeValues::Float32x2(uvs)) = mesh.attribute(Mesh::ATTRIBUTE_UV_0)
         else {
             panic!("no uvs");

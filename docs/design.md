@@ -250,16 +250,7 @@ reads well in a terminal or text editor and is easy to generate.
 - **Wall:** solid, shaded by its hue.
 - **Phantom:** becomes solid once its hue is restored.
 - **One-way platform:** the hero passes up through it and lands on top.
-- **Moving platform:** its path is drawn in the grid as a track character,
-  and the legend sets its speed. The hero rides with it:
-  - When bouncing, the platform's velocity is added to the bounce, so the
-    platform's movement skews it.
-  - With anti-gravity, a hero resting on the platform is carried along, on
-    top of their own horizontal movement.
-- **Crumbling:** gives way after being landed on a set number of times.
-- **Breakable:** only the matching split beam colour breaks it, so a red
-  block needs the red beam.
-- **Traits** set in the legend, on walls and phantoms. They combine, so a
+CHANGING- **Traits** set in the legend, on walls and phantoms. They combine, so a
   one-way phantom platform or a springy mirror is one legend entry:
   - `one_way = true`: only its top is solid. The hero rises through it,
     passes it sideways and lands on it from above. Hovering with
@@ -270,7 +261,7 @@ reads well in a terminal or text editor and is easy to generate.
   - `mirror = true`: every face reflects the beam by its angle of
     incidence, up to four times per beam. Split colour beams reflect too,
     and a reflected white beam still splits at the prism.
-- The default `=` is 10 units thick and `^` 20, with their tops on the
+- The default `=`, `:` and `_` are 10 units thick and `^` 20, with their tops on the
   tile's top; `~` and `%` fill the tile.
 
 ### Level tooling
@@ -313,7 +304,8 @@ output is committed; the game only ever loads level files.
   pickups, decoration and features each draw from their own stream, so
   changing how one is made leaves the others as they were.
 - **`assets/levels/campaign.toml`** lists the levels in play order. The
-  test room, the tower and the workshop (every tile kind in one room) are
+  test room, the tower, the workshop (the static tile kinds in one room)
+  and the changing platforms room (moving, crumbling and breakable) are
   dev levels and test fixtures, played with `--level`.
 - **Wide levels** run over ground built from short patterns that give it
   rhythm: flat stretches, stairs, hops between pillars, pits that widen,
@@ -356,15 +348,25 @@ output is committed; the game only ever loads level files.
   each landing launches the next bounce at its surface's speed, and
   hovering can't move down into a one-way platform from above. Mirrors
   count as ordinary walls for the beam, so the reach of lenses is never
-  overstated. The level is solvable if
-  the exit can be touched with white restored. `just level-check` runs it
+  overstated. Platforms that change bring reach rules of their own:
+  - **Moving:** treated as standing still at each tile along its track,
+    as the hero can wait for it to come round. Its push on a bounce is
+    left out.
+  - **Crumbling:** solid, but the search never lands on the same one twice
+    in a row, so no route counts on it holding.
+  - **Breakable:** whole at first. Any the hero could shoot from where it
+    reaches, in the beam's reach and the prism's sight with nothing else
+    in the way, count as broken, and the search runs again until no more
+    break.
+
+  The level is solvable if the exit can be touched with white restored. `just level-check` runs it
   on every level, hand-made ones included, and says whether each is
   comfortable.
 - **First campaign:** eight levels, six wide and two tall.
 - **Later:** branches and parallel routes (optional side paths to pickups,
   two ways past a gate), hand-drawn set pieces spliced into the route, and
-  placing the changing tile kinds (6b-2) once they exist; moving, crumbling
-  and breakable platforms will each bring a reach rule of their own.
+  placing the changing tile kinds (6b-2) in generated levels, using the
+  reach rules above.
 - **Background reading:** Compton and Mateas, "Procedural Level Design for
   Platform Games" (AAAI, 2006), for rhythm patterns and measuring jump
   difficulty from the physics; Fisher, "How to make insane procedural
@@ -494,6 +496,11 @@ output is committed; the game only ever loads level files.
   silvered glass with bright streaks, framed in the theme's stone. A wall
   with traits draws only as its feature, and `just art preview` shows each
   one in its sample room.
+  Crumbling ledges are the platform's stone, darker, cracked and chipped
+  underneath. Platforms that change are drawn one mesh each, so they can
+  move, shake and vanish: a moving platform draws as a one-way platform on
+  a rail along its track, and breakable blocks as crystal fractured by
+  cracks, from the phantom tileset so they always show their colour.
 - **Scenery is drawn as panels set back behind the walls**, on the same dual
   grid with a set of its own: a stone frame round leaded glass, with a rose
   window, a lit pane or broken panes in the solid variants. The glass is

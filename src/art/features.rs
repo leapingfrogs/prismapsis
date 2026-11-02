@@ -23,6 +23,8 @@ pub enum Feature {
     Spring,
     Mud,
     Mirror,
+    /// A ledge that gives way after a few landings.
+    Crumbling,
 }
 
 /// Neighbours holding the same feature, as mask bits.
@@ -39,7 +41,13 @@ pub const FEATURE_LAYERS: u16 = 16 * Feature::ALL.len() as u16;
 const HUE_TINT: f32 = 0.6;
 
 impl Feature {
-    pub const ALL: [Self; 4] = [Self::Platform, Self::Spring, Self::Mud, Self::Mirror];
+    pub const ALL: [Self; 5] = [
+        Self::Platform,
+        Self::Spring,
+        Self::Mud,
+        Self::Mirror,
+        Self::Crumbling,
+    ];
 
     /// How a wall with `traits` is drawn, or `None` for a plain wall. A
     /// mirror shows as one whatever else it does, then bounce, then one-way.
@@ -47,6 +55,8 @@ impl Feature {
     pub fn of(traits: Traits) -> Option<Self> {
         if traits.mirror {
             Some(Self::Mirror)
+        } else if traits.crumble > 0 {
+            Some(Self::Crumbling)
         } else if traits.bounce > 1.0 {
             Some(Self::Spring)
         } else if traits.bounce < 1.0 {
@@ -72,6 +82,7 @@ impl Feature {
             Self::Spring => spring(theme, x, y, mask),
             Self::Mud => mud(theme, x, y, mask),
             Self::Mirror => mirror(theme, x, y, mask),
+            Self::Crumbling => crumbling(theme, x, y, mask),
         }
     }
 }
@@ -161,6 +172,30 @@ fn platform(theme: &Theme, x: f32, y: f32, mask: u8) -> [f32; 4] {
     let across = (x.rem_euclid(SIZE / 2.0) - SIZE / 4.0).abs();
     let chevron = ((y - 6.0 - across * 0.6).abs() - 1.2).max(across - 7.0);
     colour = lerp(colour, scale(light, 1.15), cover(chevron) * 0.5);
+    with_alpha(colour, inside)
+}
+
+/// A crumbling ledge: the platform's stone, darker and split by cracks,
+/// with chips missing from its underside.
+fn crumbling(theme: &Theme, x: f32, y: f32, mask: u8) -> [f32; 4] {
+    // Twice `PLATFORM_HEIGHT` in pixels.
+    let height = 20.0;
+    // A ragged underside, chipped away in places.
+    let chip = (x * 0.31).sin() * 2.0 + (x * 0.73).sin() * 1.5;
+    let bottom = height - 1.5 + chip.min(0.0) * 1.5;
+    let inside = cover(rounded_ends(x, y, mask, bottom.max(8.0), 4.0));
+    let [light, mid, dark] = theme.stone;
+    let mut colour = lerp(
+        scale(mid, 0.8),
+        scale(dark, 0.65),
+        smoothstep(height - 8.0, height, y),
+    );
+    colour = lerp(scale(light, 0.9), colour, smoothstep(1.0, 4.0, y));
+    // Cracks running down through the ledge, two to a tile.
+    for start in [SIZE * 0.3, SIZE * 0.78] {
+        let line = start + (y * 0.5).sin() * 3.0 + y * 0.25;
+        colour = lerp(colour, theme.mortar, cover((x - line).abs() - 0.9) * 0.9);
+    }
     with_alpha(colour, inside)
 }
 
@@ -396,6 +431,7 @@ mod tests {
             one_way,
             bounce,
             mirror,
+            ..Traits::default()
         }
     }
 

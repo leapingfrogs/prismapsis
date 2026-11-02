@@ -131,6 +131,11 @@ pub struct Traits {
     pub bounce: f32,
     /// Every face reflects the beam.
     pub mirror: bool,
+    /// Landings before it gives way, growing back after a while; 0 never
+    /// crumbles.
+    pub crumble: u8,
+    /// The split beam colour that breaks it, if any.
+    pub breakable: Option<crate::light::Primary>,
 }
 
 impl Default for Traits {
@@ -139,24 +144,38 @@ impl Default for Traits {
             one_way: false,
             bounce: 1.0,
             mirror: false,
+            crumble: 0,
+            breakable: None,
         }
     }
 }
 
-/// A solid with its traits, as the physics sees it. A plain `Aabb` is an
-/// ordinary solid.
+/// A solid with its traits and how fast it's moving, as the physics sees
+/// it. A plain `Aabb` is an ordinary, still solid.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Surface {
     pub aabb: Aabb,
     pub traits: Traits,
+    /// A moving platform's velocity: added to bounces off it, and carrying
+    /// a hovering body resting on it.
+    pub velocity: Vec2,
+}
+
+impl Surface {
+    /// A still solid with `traits`.
+    #[must_use]
+    pub const fn still(aabb: Aabb, traits: Traits) -> Self {
+        Self {
+            aabb,
+            traits,
+            velocity: Vec2::ZERO,
+        }
+    }
 }
 
 impl From<Aabb> for Surface {
     fn from(aabb: Aabb) -> Self {
-        Self {
-            aabb,
-            traits: Traits::default(),
-        }
+        Self::still(aabb, Traits::default())
     }
 }
 
@@ -171,6 +190,17 @@ impl From<&Self> for Surface {
         *surface
     }
 }
+
+/// Whether a body sits on top of `solid`, its base on the top and some of
+/// it over the top.
+fn rests_on(body: &Body, solid: &Aabb) -> bool {
+    (body.pos.y - body.half - solid.max.y).abs() < REST_TOLERANCE
+        && body.pos.x + body.half > solid.min.x
+        && body.pos.x - body.half < solid.max.x
+}
+
+/// How close a body's base must be to a top to count as resting on it.
+const REST_TOLERANCE: f32 = 1.0;
 
 /// Whether a body moving down by `dy` lands on a one-way surface: only if
 /// its base was on or above the top before the move.
@@ -253,6 +283,15 @@ where
         let dx = body.vel.x * sub_dt;
         body.pos.x += dx;
         resolve_x(body, spin, tuning, solids, dx, &mut contacts);
+
+        // Resting on a moving platform carries the body along with it.
+        if let Some(platform) = solids
+            .iter()
+            .map(Into::<Surface>::into)
+            .find(|s| s.velocity != Vec2::ZERO && rests_on(body, &s.aabb))
+        {
+            body.pos += platform.velocity * sub_dt;
+        }
 
         let dy = body.vel.y * sub_dt;
         body.pos.y += dy;
@@ -346,8 +385,11 @@ fn resolve_y<'a, S>(
         }
         if dy < 0.0 {
             body.pos.y = solid.max.y + body.half;
-            body.vel.y = tuning.bounce_speed() * surface.traits.bounce.max(0.0).sqrt();
-            body.vel.x = tuning.horizontal_speed(spin);
+            // A moving platform adds its own speed to the bounce, upwards
+            // only, so one moving down can't flatten it.
+            body.vel.y = tuning.bounce_speed() * surface.traits.bounce.max(0.0).sqrt()
+                + surface.velocity.y.max(0.0);
+            body.vel.x = tuning.horizontal_speed(spin) + surface.velocity.x;
             contacts.floor = true;
         } else {
             body.pos.y = solid.min.y - body.half;
@@ -698,13 +740,13 @@ mod tests {
     }
 
     fn one_way(aabb: Aabb) -> Surface {
-        Surface {
+        Surface::still(
             aabb,
-            traits: Traits {
+            Traits {
                 one_way: true,
                 ..Traits::default()
             },
-        }
+        )
     }
 
     /// Highest the body's base gets in `seconds`, bouncing off `solids`.
@@ -760,12 +802,14 @@ mod tests {
 
     #[test]
     fn springs_raise_bounces_and_mud_lowers_them() {
-        let pad = |bounce| Surface {
-            aabb: floor(),
-            traits: Traits {
-                bounce,
-                ..Traits::default()
-            },
+        let pad = |bounce| {
+            Surface::still(
+                floor(),
+                Traits {
+                    bounce,
+                    ..Traits::default()
+                },
+            )
         };
         let apex = BounceTuning::default().apex_height;
         let top = |bounce| highest(&mut resting_body(), &[pad(bounce)], 3.0) - floor().max.y;
@@ -792,5 +836,35 @@ mod tests {
         let aabb = Aabb::from_center(Vec2::new(10.0, 20.0), Vec2::new(5.0, 2.0));
         assert_eq!(aabb.center(), Vec2::new(10.0, 20.0));
         assert_eq!(aabb.size(), Vec2::new(10.0, 4.0));
+    }
+
+    #[test]
+    fn a_moving_platform_adds_its_speed_to_a_bounce_and_carries_a_hoverer() {
+        let tuning = BounceTuning::default();
+        let platform = Surface {
+            aabb: floor(),
+            traits: Traits::default(),
+            velocity: Vec2::new(60.0, 100.0),
+        };
+        let mut body = Body {
+            pos: Vec2::new(0.0, HALF + 1.0),
+            vel: Vec2::new(0.0, -200.0),
+            half: HALF,
+        };
+        let mut spin = 0;
+        let contacts = step(&mut body, &mut spin, &tuning, &[platform], DT);
+        assert!(contacts.floor);
+        assert!((body.vel.x - 60.0).abs() < 1e-3);
+        // Launched faster than a still floor would, less a little gravity.
+        assert!(body.vel.y > tuning.bounce_speed() + 75.0);
+
+        let mut resting = resting_body();
+        let mut spin = 0;
+        hover_step(&mut resting, &mut spin, 0, &tuning, &[platform], 0.5);
+        assert!(
+            (resting.pos.x - 30.0).abs() < 1.0,
+            "carried {}",
+            resting.pos.x
+        );
     }
 }

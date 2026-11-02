@@ -1,0 +1,33 @@
+# A dev level for the platforms that change: a red block to break with the
+# red beam before anything else, a green block to try the wrong colours on,
+# a platform running back and forth along its track, one riding up and down
+# its track, and crumbling platforms up to the exit. See "Tile kinds" in
+# docs/design.md.
+name = "Changing platforms"
+
+map = '''
+############################################
+#                                          #
+#                                      XXX #
+#                                      XXX #
+#                                      XXX #
+#                                     ######
+#                                          #
+#                                          #
+#                             -            #
+#        !!                   -   ::::     #
+#        !!                   -            #
+#        !!                   -            #
+#        !!                   -       :::: #
+#        !!  -----___------   -            #
+#   gg   !!                   -            #
+#        !!                   -    ::::    #
+#        !!                   -            #
+#        !!                   -            #
+# @      !!                   ___          #
+############################################
+'''
+
+[legend]
+"!" = { wall = "grey", breakable = "red" }
+"g" = { wall = "grey", breakable = "green" }

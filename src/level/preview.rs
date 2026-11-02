@@ -36,7 +36,10 @@ fn cell_colours(
     scenery: Option<[u8; 3]>,
 ) -> (Option<[u8; 3]>, Option<[u8; 3]>) {
     match tile {
-        Some(Tile::Wall { hue, .. }) => (Some([20, 20, 25]), Some(shade(hue))),
+        Some(Tile::Wall { hue, .. } | Tile::Mover { hue, .. }) => {
+            (Some([20, 20, 25]), Some(shade(hue)))
+        }
+        Some(Tile::Track) => (Some(GREY_WALL), scenery),
         Some(Tile::Phantom { hue, .. }) => (Some(shade(Some(hue))), scenery),
         Some(Tile::Scenery(hue)) => (None, Some(dim(shade(hue)))),
         Some(Tile::Lens(colour)) => (Some(shade(Some(colour.into()))), scenery),
