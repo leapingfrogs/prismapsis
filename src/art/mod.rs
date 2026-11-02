@@ -9,6 +9,7 @@
 pub mod features;
 pub mod figures;
 pub mod glow;
+pub mod hud;
 pub mod paint;
 pub mod phantoms;
 pub mod sprites;

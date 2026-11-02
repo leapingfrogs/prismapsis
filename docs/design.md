@@ -550,6 +550,13 @@ output is committed; the game only ever loads level files.
   top left, with faint seams between cells and a gleam on the corner.
 - **Beams** are a soft glow stretched along each piece, from a painted
   profile, with a whitened core down the middle.
+- **The HUD** shares one look: lives are small heroes from the sprite sheet;
+  the energy bar and the spectrum gauges are glass tubes, painted by the
+  `art` tool and sliced to any length, that fill with light in their
+  colour; and the power-ups held are small pickup bubbles with their
+  glyphs. All text is set in Exo 2 (SIL Open Font License, in
+  `assets/fonts`), embedded in the game in place of Bevy's default font,
+  with headings and the score in semibold.
 - **The exit** is a doorway: a pale frame with an arched opening, sliced
   to fit any size, and light filling the opening that is brightest at the
   floor with thin rays rising. Both stay dim until white is restored, then

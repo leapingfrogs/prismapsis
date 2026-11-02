@@ -17,6 +17,7 @@ use crate::enemy::{
 };
 use crate::events::GameEvent;
 use crate::hero::{Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin};
+use crate::hud::{self, HudArt};
 use crate::level::{Checkpoint, RoomBounds, Solid};
 use crate::light::{Colour, Hidden, Primary};
 use crate::physics::{BounceTuning, Traits};
@@ -90,6 +91,7 @@ impl Plugin for PresentationPlugin {
                 crate::spectrum_view::SpectrumViewPlugin,
                 crate::art::tiles::TilesPlugin,
                 crate::art::figures::FiguresPlugin,
+                hud::HudPlugin,
             ));
     }
 }
@@ -566,34 +568,25 @@ const ENERGY_LOW_COLOUR: Color = Color::srgb(0.9, 0.3, 0.3);
 #[derive(Component, Debug)]
 pub struct EnergyBarFill;
 
-/// Energy bar in the top-left corner, sized relative to the window so it
-/// looks the same at any resolution.
-fn spawn_energy_bar(mut commands: Commands) {
-    commands
-        .spawn((
-            Name::new("Energy bar"),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Vw(1.5),
-                top: Val::Vh(2.5),
-                width: Val::Vw(16.0),
-                height: Val::Vh(1.6),
-                padding: UiRect::all(Val::Vh(0.3)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
-        ))
-        .with_children(|bar| {
-            bar.spawn((
-                EnergyBarFill,
-                Node {
-                    width: Val::Percent(100.0),
-                    height: Val::Percent(100.0),
-                    ..default()
-                },
-                BackgroundColor(ENERGY_COLOUR),
-            ));
-        });
+/// The energy bar: a glass tube in the top-left corner, under the lives,
+/// sized relative to the window so it looks the same at any resolution.
+fn spawn_energy_bar(mut commands: Commands, art: Res<HudArt>) {
+    commands.spawn((
+        Name::new("Energy bar"),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Vw(1.5),
+            top: Val::Vh(HUD_ENERGY_TOP),
+            ..default()
+        },
+        children![hud::tube(
+            &art,
+            Val::Vw(16.0),
+            2.6,
+            ENERGY_COLOUR,
+            EnergyBarFill
+        )],
+    ));
 }
 
 /// Fraction of the bar to fill, 0 to 1.
@@ -607,15 +600,15 @@ pub fn energy_fraction(current: f32, max: f32) -> f32 {
 fn update_energy_bar(
     energy: Res<BeamEnergy>,
     tuning: Res<BeamTuning>,
-    mut fills: Query<(&mut Node, &mut BackgroundColor), With<EnergyBarFill>>,
+    mut fills: Query<(&mut Node, &mut ImageNode), With<EnergyBarFill>>,
 ) {
     if !energy.is_changed() && !tuning.is_changed() {
         return;
     }
     let too_low = !energy.firing && energy.current < tuning.min_energy_to_fire;
-    for (mut node, mut colour) in &mut fills {
+    for (mut node, mut image) in &mut fills {
         node.width = Val::Percent(energy_fraction(energy.current, tuning.max_energy) * 100.0);
-        colour.0 = if too_low {
+        image.color = if too_low {
             ENERGY_LOW_COLOUR
         } else {
             ENERGY_COLOUR
@@ -808,15 +801,17 @@ fn animate_pickups(
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AbilityPip(pub PowerUp);
 
-fn spawn_ability_pips(mut commands: Commands) {
+/// The power-ups held, as small pickup bubbles with their glyphs, under
+/// the spectrum gauges.
+fn spawn_ability_pips(mut commands: Commands, sheet: Res<Sheet>) {
     commands
         .spawn((
             Name::new("Abilities"),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Vw(1.5),
-                top: Val::Vh(8.0),
-                column_gap: Val::Vh(0.8),
+                top: Val::Vh(HUD_ABILITIES_TOP),
+                column_gap: Val::Vh(0.6),
                 ..default()
             },
         ))
@@ -824,13 +819,8 @@ fn spawn_ability_pips(mut commands: Commands) {
             for power in PowerUp::ALL {
                 row.spawn((
                     AbilityPip(power),
-                    Node {
-                        width: Val::Vh(2.4),
-                        height: Val::Vh(1.0),
-                        display: Display::None,
-                        ..default()
-                    },
-                    BackgroundColor(power_up_colour(power)),
+                    hud::icon(&sheet, Figure::Bubble, power_up_colour(power), 3.6),
+                    children![hud::overlay(&sheet, Figure::Glyph(power), Color::WHITE)],
                 ));
             }
         });
@@ -872,21 +862,28 @@ fn blink_hero(mut heroes: Query<(&Invulnerable, &mut Visibility), With<Hero>>) {
     }
 }
 
-const LIFE_COLOUR: Color = Color::srgb(0.92, 0.92, 0.96);
+const LIFE_COLOUR: Color = HERO_COLOUR;
 
-/// One life indicator under the energy bar; index 0 is the leftmost.
+/// Where each row of the HUD sits, from the top of the window (vh): lives,
+/// then energy, the spectrum gauges and the power-ups held.
+const HUD_LIVES_TOP: f32 = 2.0;
+const HUD_ENERGY_TOP: f32 = 5.6;
+pub const HUD_GAUGES_TOP: f32 = 9.0;
+const HUD_ABILITIES_TOP: f32 = 12.2;
+
+/// One life, drawn as a small hero; index 0 is the leftmost.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LifePip(pub u8);
 
-fn spawn_life_pips(mut commands: Commands) {
+fn spawn_life_pips(mut commands: Commands, sheet: Res<Sheet>) {
     commands
         .spawn((
             Name::new("Lives"),
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Vw(1.5),
-                top: Val::Vh(5.0),
-                column_gap: Val::Vh(0.8),
+                top: Val::Vh(HUD_LIVES_TOP),
+                column_gap: Val::Vh(0.5),
                 ..default()
             },
         ))
@@ -894,12 +891,8 @@ fn spawn_life_pips(mut commands: Commands) {
             for index in 0..STARTING_LIVES {
                 row.spawn((
                     LifePip(index),
-                    Node {
-                        width: Val::Vh(1.6),
-                        height: Val::Vh(1.6),
-                        ..default()
-                    },
-                    BackgroundColor(LIFE_COLOUR),
+                    hud::icon(&sheet, Figure::HeroSurface, LIFE_COLOUR, 3.0),
+                    children![hud::overlay(&sheet, Figure::HeroShade, Color::WHITE)],
                 ));
             }
         });
