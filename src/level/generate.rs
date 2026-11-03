@@ -1132,6 +1132,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn the_same_settings_give_the_same_level() {
         let wide = recipe(7, Shape::Wide, &[Tint::Red, Tint::Yellow]);
         let first = generate("A", &wide).unwrap();
@@ -1149,6 +1150,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn generated_levels_read_back_with_their_settings() {
         for shape in [Shape::Wide, Shape::Tall] {
             let made = recipe(3, shape, &[Tint::Green, Tint::Magenta]);
@@ -1177,6 +1179,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn every_gate_is_needed() {
         for shape in [Shape::Wide, Shape::Tall] {
             let made = recipe(11, shape, &[Tint::Blue, Tint::Cyan]);
@@ -1195,6 +1198,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn features_are_placed_when_asked_for() {
         let all = vec![
             Feature::Platforms,
@@ -1227,6 +1231,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn changing_platforms_are_placed_when_asked_for() {
         let changing = vec![Feature::Crumbling, Feature::Movers, Feature::Breakable];
         for (shape, seed) in [(Shape::Wide, 11), (Shape::Tall, 12)] {

@@ -80,6 +80,9 @@ jobs:
           tool: cargo-llvm-cov
       - name: Run tests with coverage
         run: cargo llvm-cov --workspace --all-features --locked --no-report
+      # The tests marked to be left out under coverage, and the rest again.
+      - name: Run tests without coverage
+        run: cargo test --workspace --all-features --locked
       - name: Check threshold and write lcov
         run: cargo llvm-cov report --ignore-filename-regex 'src/(main|dev_tools)\.rs' --fail-under-lines 80 --lcov --output-path lcov.info
       - name: Write HTML report
