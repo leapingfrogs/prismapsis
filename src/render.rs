@@ -878,6 +878,7 @@ pub const fn power_up_colour(power: PowerUp) -> Color {
         PowerUp::Spread => Color::srgb(0.45, 0.95, 0.55),
         PowerUp::RapidFire => Color::srgb(1.0, 0.9, 0.3),
         PowerUp::Piercing => Color::srgb(0.35, 0.75, 1.0),
+        PowerUp::AirSteering => Color::srgb(1.0, 0.5, 0.78),
     }
 }
 

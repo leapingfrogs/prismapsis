@@ -19,7 +19,7 @@ pub use format::{Level, LevelError, parse};
 use crate::enemy::{EnemyTuning, ResetRoom, reset_room};
 use crate::events::GameEvent;
 use crate::hero::{
-    Facing, HERO_RADIUS, Hero, Position, PreviousPosition, Spin, Velocity, move_hero,
+    Carry, Facing, HERO_RADIUS, Hero, Position, PreviousPosition, Spin, Velocity, move_hero,
 };
 use crate::light::{ExitGate, Hidden, LevelsCompleted, LightTuning, Phantom, Shade, reach_exit};
 use crate::physics::{Aabb, Traits};
@@ -472,6 +472,7 @@ pub struct LevelRestart<'w, 's> {
             &'static mut PreviousPosition,
             &'static mut Velocity,
             &'static mut Spin,
+            &'static mut Carry,
             &'static mut Facing,
         ),
         With<Hero>,
@@ -490,12 +491,13 @@ impl LevelRestart<'_, '_> {
                 ..*checkpoint
             });
         }
-        for (mut pos, mut prev, mut vel, mut spin, mut facing) in &mut self.heroes {
+        for (mut pos, mut prev, mut vel, mut spin, mut carry, mut facing) in &mut self.heroes {
             // Move both so the hero snaps rather than sweeping across.
             pos.0 = start;
             prev.0 = start;
             *vel = Velocity::default();
             *spin = Spin::default();
+            *carry = Carry::default();
             *facing = Facing::default();
         }
         spawn_pickups(commands, &self.level.0);

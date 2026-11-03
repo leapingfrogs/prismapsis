@@ -13,12 +13,14 @@ use bevy::prelude::*;
 use crate::beam::{BeamEnergy, damage_enemies};
 use crate::events::GameEvent;
 use crate::hero::{
-    Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
+    Carry, Facing, HERO_RADIUS, Hero, Invulnerable, Position, PreviousPosition, Spin, Velocity,
 };
 use crate::level::{CurrentLevel, LevelRestart, RespawnPoint, RoomBounds, Solid, view_bottom};
-use crate::light::{Colour, LightTuning, Primary, Spectrum};
+use crate::light::{Colour, Hidden, LightTuning, Primary, Spectrum};
 use crate::physics::{Aabb, ray_aabb};
-use crate::powerup::{Abilities, DropRng, Pickup, PowerUpTuning, pickup_bundle, roll_drop};
+use crate::powerup::{
+    Abilities, DropRng, Pickup, PowerUp, PowerUpTuning, pickup_bundle, roll_drop,
+};
 use crate::prism::{PRISM_RADIUS, Prism, orbit_prism};
 
 /// Distance from the hero at which waves appear: just beyond the edge of a
@@ -495,7 +497,11 @@ fn defeat_enemies(
     light: Res<LightTuning>,
     mut spectrum: ResMut<Spectrum>,
     enemies: Query<(Entity, &Enemy, &Position, Option<&Colour>)>,
+    pickups: Query<&Pickup, Without<Hidden>>,
 ) {
+    // Pickups lying in the level, and those dropped this step, are not
+    // offered again.
+    let mut waiting: Vec<PowerUp> = pickups.iter().map(|pickup| pickup.power).collect();
     for (entity, enemy, pos, colour) in &enemies {
         if enemy.health > 0 {
             continue;
@@ -521,7 +527,8 @@ fn defeat_enemies(
                 events.write(GameEvent::ColourRestored { hue });
             }
         }
-        if let Some(power) = roll_drop(&mut rng, *abilities, powerup_tuning.drop_chance) {
+        if let Some(power) = roll_drop(&mut rng, *abilities, &waiting, powerup_tuning.drop_chance) {
+            waiting.push(power);
             commands.spawn(pickup_bundle(power, pos.0));
             events.write(GameEvent::PickupDropped { power, at: pos.0 });
         }
@@ -560,13 +567,14 @@ fn hero_hits(
             &mut PreviousPosition,
             &mut Velocity,
             &mut Spin,
+            &mut Carry,
             &mut Facing,
             &mut Invulnerable,
         ),
         With<Hero>,
     >,
 ) {
-    let Ok((mut pos, mut prev, mut vel, mut spin, mut facing, mut invulnerable)) =
+    let Ok((mut pos, mut prev, mut vel, mut spin, mut carry, mut facing, mut invulnerable)) =
         heroes.single_mut()
     else {
         return;
@@ -605,6 +613,7 @@ fn hero_hits(
     prev.0 = respawn.0;
     *vel = Velocity::default();
     *spin = Spin::default();
+    *carry = Carry::default();
     *facing = Facing::default();
     invulnerable.0 = tuning.respawn_invulnerability;
 }

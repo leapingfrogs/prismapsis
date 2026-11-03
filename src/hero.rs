@@ -57,6 +57,12 @@ impl Facing {
     }
 }
 
+/// Horizontal speed the hero took from what it last bounced off, such as a
+/// moving platform, on top of its spin's. Air steering keeps it.
+#[derive(Component, Debug, Default, Clone, Copy, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct Carry(pub f32);
+
 /// Seconds of invulnerability remaining after losing a life.
 #[derive(Component, Debug, Default, Clone, Copy, PartialEq, Reflect)]
 #[reflect(Component)]
@@ -72,6 +78,7 @@ pub fn spawn_hero(mut commands: Commands, level: Res<CurrentLevel>) {
         PreviousPosition(start),
         Velocity::default(),
         Spin::default(),
+        Carry::default(),
         Facing::default(),
         Invulnerable::default(),
     ));
@@ -143,6 +150,7 @@ pub fn move_hero(
             &mut PreviousPosition,
             &mut Velocity,
             &mut Spin,
+            &mut Carry,
         ),
         With<Hero>,
     >,
@@ -155,7 +163,7 @@ pub fn move_hero(
             velocity: velocity.map_or(Vec2::ZERO, |v| v.0),
         })
         .collect();
-    for (mut pos, mut prev, mut vel, mut spin) in &mut heroes {
+    for (mut pos, mut prev, mut vel, mut spin, mut carry) in &mut heroes {
         prev.0 = pos.0;
         let mut body = Body {
             pos: pos.0,
@@ -169,9 +177,24 @@ pub fn move_hero(
             let mut contacts =
                 physics::hover_step(&mut body, &mut spin.0, hover.0, &tuning, &solids, dt);
             contacts.floor = false;
+            carry.0 = 0.0;
             contacts
         } else {
-            physics::step(&mut body, &mut spin.0, &tuning, &solids, dt)
+            // With air steering, spin changes take effect at once, easing
+            // towards the new spin's speed rather than waiting for a floor.
+            if abilities.has(PowerUp::AirSteering) {
+                let target = tuning.horizontal_speed(spin.0) + carry.0;
+                let change = tuning.air_steer_rate() * dt;
+                body.vel.x += (target - body.vel.x).clamp(-change, change);
+            }
+            let contacts = physics::step(&mut body, &mut spin.0, &tuning, &solids, dt);
+            // A floor sets the speed afresh; a wall turns it all round.
+            if contacts.floor {
+                carry.0 = body.vel.x - tuning.horizontal_speed(spin.0);
+            } else if contacts.wall {
+                carry.0 = -carry.0;
+            }
+            contacts
         };
         pos.0 = body.pos;
         if contacts.floor {
@@ -277,6 +300,83 @@ mod tests {
             .unwrap()
             .0
             .y
+    }
+
+    /// A hero high in the air at `spin`, moving at its speed, plus `carry`.
+    fn airborne(app: &mut App, spin: i8, carry: f32) {
+        let speed = app
+            .world()
+            .resource::<BounceTuning>()
+            .horizontal_speed(spin)
+            + carry;
+        let world = app.world_mut();
+        let (mut pos, mut vel, mut s, mut c) = world
+            .query_filtered::<(&mut Position, &mut Velocity, &mut Spin, &mut Carry), With<Hero>>()
+            .single_mut(world)
+            .unwrap();
+        pos.0 = Vec2::new(0.0, 20_000.0);
+        vel.0 = Vec2::new(speed, 0.0);
+        s.0 = spin;
+        c.0 = carry;
+    }
+
+    fn hero_vx(app: &mut App) -> f32 {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&Velocity, With<Hero>>()
+            .single(world)
+            .unwrap()
+            .0
+            .x
+    }
+
+    fn set_spin(app: &mut App, spin: i8) {
+        let world = app.world_mut();
+        world
+            .query_filtered::<&mut Spin, With<Hero>>()
+            .single_mut(world)
+            .unwrap()
+            .0 = spin;
+    }
+
+    #[test]
+    fn spin_waits_for_a_bounce_unless_steering_in_the_air() {
+        let mut app = sim_app();
+        airborne(&mut app, 5, 0.0);
+        set_spin(&mut app, -5);
+        for _ in 0..10 {
+            app.update();
+        }
+        let full = app.world().resource::<BounceTuning>().horizontal_speed(5);
+        assert!((hero_vx(&mut app) - full).abs() < 1e-3, "held its speed");
+
+        app.world_mut()
+            .resource_mut::<Abilities>()
+            .grant(PowerUp::AirSteering);
+        airborne(&mut app, 5, 0.0);
+        set_spin(&mut app, -5);
+        app.update();
+        let first = hero_vx(&mut app);
+        assert!(first < full && first > -full, "eases rather than snaps");
+        // Well past the swing time it's going full speed the other way.
+        for _ in 0..40 {
+            app.update();
+        }
+        assert!((hero_vx(&mut app) + full).abs() < 1e-3);
+    }
+
+    #[test]
+    fn air_steering_keeps_the_speed_carried_from_a_platform() {
+        let mut app = sim_app();
+        app.world_mut()
+            .resource_mut::<Abilities>()
+            .grant(PowerUp::AirSteering);
+        airborne(&mut app, 2, 120.0);
+        for _ in 0..10 {
+            app.update();
+        }
+        let tuning = app.world().resource::<BounceTuning>().clone();
+        assert!((hero_vx(&mut app) - tuning.horizontal_speed(2) - 120.0).abs() < 1e-3);
     }
 
     #[test]
