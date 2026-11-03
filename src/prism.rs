@@ -1,14 +1,16 @@
 //! The prism companion, which orbits the hero.
 //!
 //! It holds its place on the orbit while the freeze button is held, and can
-//! then be nudged around the orbit for precise positioning. Simulation only;
-//! visuals live in `render`.
+//! then be nudged around the orbit for precise positioning. Extra prisms
+//! from pickups join it in a ring, always evenly spaced round the hero, and
+//! held and nudged together. Simulation only; visuals live in `render`.
 
-use std::f32::consts::TAU;
+use std::f32::consts::{PI, TAU};
 
 use bevy::prelude::*;
 
 use crate::hero::{Hero, Position, PreviousPosition, move_hero};
+use crate::powerup::Abilities;
 
 /// Size of the prism, centre to tip (world units). Beams treat it as a
 /// circle of this radius, which is simpler and more forgiving to aim with
@@ -76,6 +78,78 @@ pub fn orbit_offset(angle: f32, radius: f32) -> Vec2 {
     Vec2::from_angle(angle) * radius
 }
 
+/// How fast a prism glides round the orbit to its place in the ring
+/// (revolutions per second), after one joins or breaks.
+pub const GLIDE_SPEED: f32 = 0.5;
+
+/// The ring of prisms' own angle: where its first place is. The prisms'
+/// places are spread evenly round from it.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq)]
+pub struct PrismRing(pub f32);
+
+/// Signed turn from angle `from` to angle `to`, the short way round, in
+/// `-PI..PI`.
+#[must_use]
+pub fn turn(from: f32, to: f32) -> f32 {
+    (to - from + PI).rem_euclid(TAU) - PI
+}
+
+/// The place in the ring for each of the prisms at `angles`: keeping them
+/// in order round the orbit, the evenly spaced places from `ring` that
+/// move them least. Returns each prism's place angle.
+#[must_use]
+pub fn ring_places(ring: f32, angles: &[f32]) -> Vec<f32> {
+    let n = angles.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    #[allow(clippy::cast_precision_loss)]
+    let step = TAU / n as f32;
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| {
+        let from_ring = |i: usize| (angles[i] - ring).rem_euclid(TAU);
+        from_ring(a).total_cmp(&from_ring(b))
+    });
+    #[allow(clippy::cast_precision_loss)]
+    let place = |rank: usize, shift: usize| ring + ((rank + shift) % n) as f32 * step;
+    let cost = |shift: usize| -> f32 {
+        order
+            .iter()
+            .enumerate()
+            .map(|(rank, &i)| turn(angles[i], place(rank, shift)).abs())
+            .sum()
+    };
+    let shift = (0..n)
+        .min_by(|&a, &b| cost(a).total_cmp(&cost(b)))
+        .unwrap_or(0);
+    let mut places = vec![0.0; n];
+    for (rank, &i) in order.iter().enumerate() {
+        places[i] = place(rank, shift);
+    }
+    places
+}
+
+/// Where a new prism joins: in the middle of the widest gap between the
+/// prisms at `angles`, or opposite the only one.
+#[must_use]
+pub fn joining_angle(angles: &[f32]) -> f32 {
+    let mut sorted: Vec<f32> = angles.iter().map(|a| a.rem_euclid(TAU)).collect();
+    sorted.sort_by(f32::total_cmp);
+    let Some(&first) = sorted.first() else {
+        return 0.0;
+    };
+    let gaps = sorted
+        .iter()
+        .copied()
+        .zip(sorted.iter().copied().skip(1).chain([first + TAU]))
+        .map(|(a, b)| (b - a, a));
+    let (gap, start) = gaps.fold(
+        (0.0, first),
+        |best, gap| if gap.0 > best.0 { gap } else { best },
+    );
+    (start + gap / 2.0).rem_euclid(TAU)
+}
+
 #[derive(Debug, Default)]
 pub struct PrismPlugin;
 
@@ -85,10 +159,23 @@ impl Plugin for PrismPlugin {
             .register_type::<PrismTuning>()
             .init_resource::<PrismFrozen>()
             .init_resource::<PrismNudge>()
+            .init_resource::<PrismRing>()
             .add_systems(Startup, spawn_prism)
             .add_systems(Update, prism_input.run_if(crate::pause::running))
-            .add_systems(FixedUpdate, orbit_prism.after(move_hero));
+            .add_systems(
+                FixedUpdate,
+                (fill_ring, orbit_prism).chain().after(move_hero),
+            );
     }
+}
+
+fn prism_bundle(angle: f32, at: Vec2) -> impl Bundle {
+    (
+        Name::new("Prism"),
+        Prism { angle },
+        Position(at),
+        PreviousPosition(at),
+    )
 }
 
 fn spawn_prism(
@@ -97,12 +184,33 @@ fn spawn_prism(
     level: Res<crate::level::CurrentLevel>,
 ) {
     let start = level.0.start + orbit_offset(0.0, tuning.orbit_radius);
-    commands.spawn((
-        Name::new("Prism"),
-        Prism::default(),
-        Position(start),
-        PreviousPosition(start),
-    ));
+    commands.spawn(prism_bundle(0.0, start));
+}
+
+/// Keep as many prisms as the hero's abilities say: new ones join in the
+/// widest gap, and extra ones go (from the end of the ring) when they're
+/// lost all at once, as on losing a life.
+fn fill_ring(
+    mut commands: Commands,
+    abilities: Res<Abilities>,
+    tuning: Res<PrismTuning>,
+    heroes: Query<&Position, (With<Hero>, Without<Prism>)>,
+    prisms: Query<(Entity, &Prism)>,
+) {
+    let Ok(hero) = heroes.single() else {
+        return;
+    };
+    let wanted = usize::from(abilities.prisms());
+    let mut angles: Vec<f32> = prisms.iter().map(|(_, p)| p.angle).collect();
+    while angles.len() < wanted {
+        let angle = joining_angle(&angles);
+        angles.push(angle);
+        let at = hero.0 + orbit_offset(angle, tuning.orbit_radius);
+        commands.spawn(prism_bundle(angle, at));
+    }
+    for (entity, _) in prisms.iter().skip(wanted) {
+        commands.entity(entity).despawn();
+    }
 }
 
 /// Hold Shift (gamepad left trigger) to freeze the prism; while
@@ -137,15 +245,26 @@ pub fn orbit_prism(
     tuning: Res<PrismTuning>,
     frozen: Res<PrismFrozen>,
     nudge: Res<PrismNudge>,
+    mut ring: ResMut<PrismRing>,
     heroes: Query<&Position, (With<Hero>, Without<Prism>)>,
     mut prisms: Query<(&mut Prism, &mut Position, &mut PreviousPosition), Without<Hero>>,
 ) {
     let Ok(hero) = heroes.single() else {
         return;
     };
+    let dt = time.delta_secs();
     let rate = orbit_rate(&tuning, frozen.0, nudge.0);
-    for (mut prism, mut pos, mut prev) in &mut prisms {
-        prism.angle = advance_angle(prism.angle, rate, time.delta_secs());
+    ring.0 = advance_angle(ring.0, rate, dt);
+    let angles: Vec<f32> = prisms
+        .iter()
+        .map(|(prism, ..)| advance_angle(prism.angle, rate, dt))
+        .collect();
+    let places = ring_places(ring.0, &angles);
+    let glide = GLIDE_SPEED * TAU * dt;
+    for ((mut prism, mut pos, mut prev), (angle, place)) in
+        prisms.iter_mut().zip(angles.into_iter().zip(places))
+    {
+        prism.angle = (angle + turn(angle, place).clamp(-glide, glide)).rem_euclid(TAU);
         prev.0 = pos.0;
         pos.0 = hero.0 + orbit_offset(prism.angle, tuning.orbit_radius);
     }
@@ -311,5 +430,84 @@ mod tests {
         let (_, _, end) = hero_and_prism(&mut app);
         // Still orbiting anticlockwise at the normal speed.
         assert!(angle_delta(start, end) > 0.1);
+    }
+
+    #[test]
+    fn places_keep_the_ring_in_order_and_move_prisms_least() {
+        // One prism keeps the ring's place.
+        assert_eq!(ring_places(1.0, &[1.0]), vec![1.0]);
+        // Two near each other go to opposite sides, each moving a little.
+        let places = ring_places(0.0, &[0.1, 0.4]);
+        assert!(turn(places[0], 0.0).abs() < 1e-5);
+        assert!(turn(places[1], PI).abs() < 1e-5);
+        // Already evenly spaced but just behind the ring: they stay put.
+        let behind = [TAU - 0.01, PI - 0.01];
+        let places = ring_places(0.0, &behind);
+        for (place, angle) in places.iter().zip(behind) {
+            assert!(turn(angle, *place).abs() < 0.02);
+        }
+    }
+
+    #[test]
+    fn a_new_prism_joins_in_the_widest_gap() {
+        assert!(turn(joining_angle(&[0.0]), PI).abs() < 1e-5);
+        assert!(turn(joining_angle(&[0.0, 1.0]), 1.0 + (TAU - 1.0) / 2.0).abs() < 1e-5);
+    }
+
+    fn ring(app: &mut App) -> Vec<f32> {
+        let world = app.world_mut();
+        let hero = world
+            .query_filtered::<&Position, With<Hero>>()
+            .single(world)
+            .unwrap()
+            .0;
+        let mut angles: Vec<f32> = world
+            .query::<(&Prism, &Position)>()
+            .iter(world)
+            .map(|(_, p)| (p.0 - hero).to_angle().rem_euclid(TAU))
+            .collect();
+        angles.sort_by(f32::total_cmp);
+        angles
+    }
+
+    /// Whether `angles` (sorted) are evenly spaced round the orbit.
+    fn evenly_spaced(angles: &[f32]) -> bool {
+        #[allow(clippy::cast_precision_loss)]
+        let step = TAU / angles.len() as f32;
+        angles
+            .iter()
+            .zip(angles.iter().cycle().skip(1))
+            .all(|(&a, &b)| (turn(a, b).rem_euclid(TAU) - step).abs() < 1e-3)
+    }
+
+    #[test]
+    fn prisms_join_and_leave_the_ring_evenly_spaced() {
+        use crate::powerup::{MAX_PRISMS, PowerUp};
+        let mut app = sim_app();
+        app.update();
+        for _ in 0..10 {
+            app.world_mut()
+                .resource_mut::<Abilities>()
+                .grant(PowerUp::Prism);
+        }
+        // Well after gliding into place, there are the most and evenly
+        // spaced; held still, they stay that way.
+        for _ in 0..90 {
+            app.update();
+        }
+        let angles = ring(&mut app);
+        assert_eq!(angles.len(), usize::from(MAX_PRISMS));
+        assert!(evenly_spaced(&angles), "{angles:?}");
+
+        // Losing two leaves three, which spread out again.
+        let mut abilities = app.world_mut().resource_mut::<Abilities>();
+        abilities.revoke(PowerUp::Prism);
+        abilities.revoke(PowerUp::Prism);
+        for _ in 0..90 {
+            app.update();
+        }
+        let angles = ring(&mut app);
+        assert_eq!(angles.len(), 3);
+        assert!(evenly_spaced(&angles), "{angles:?}");
     }
 }

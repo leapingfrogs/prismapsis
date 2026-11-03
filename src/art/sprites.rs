@@ -57,7 +57,7 @@ pub enum Figure {
 
 impl Figure {
     /// Every figure, in sheet order.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::HeroSurface,
         Self::HeroShade,
         Self::Prism,
@@ -68,6 +68,7 @@ impl Figure {
         Self::Glyph(PowerUp::RapidFire),
         Self::Glyph(PowerUp::Piercing),
         Self::Glyph(PowerUp::AirSteering),
+        Self::Glyph(PowerUp::Prism),
         Self::Mote,
         Self::Lens,
         Self::Orb,
@@ -403,6 +404,24 @@ pub fn glyph_parts(power: PowerUp) -> Vec<(GlyphPart, Vec2, f32)> {
                 PI,
             ),
         ],
+        // A prism's outline: a triangle point up.
+        PowerUp::Prism => {
+            let r = s * 0.95;
+            let side = r * 3f32.sqrt() + STROKE * 0.6;
+            vec![
+                (GlyphPart::Bar(side, STROKE), Vec2::new(0.0, -r * 0.5), 0.0),
+                (
+                    GlyphPart::Bar(side, STROKE),
+                    Vec2::from_angle(PI / 6.0) * r * 0.5,
+                    2.0 * PI / 3.0,
+                ),
+                (
+                    GlyphPart::Bar(side, STROKE),
+                    Vec2::from_angle(5.0 * PI / 6.0) * r * 0.5,
+                    PI / 3.0,
+                ),
+            ]
+        }
     }
 }
 
@@ -710,7 +729,11 @@ mod tests {
 
     #[test]
     fn every_power_up_has_a_distinct_glyph() {
-        let glyphs: Vec<_> = PowerUp::ALL.into_iter().map(glyph_parts).collect();
+        let glyphs: Vec<_> = PowerUp::ALL
+            .into_iter()
+            .chain([PowerUp::Prism])
+            .map(glyph_parts)
+            .collect();
         assert!(glyphs.iter().all(|parts| !parts.is_empty()));
         for (i, a) in glyphs.iter().enumerate() {
             for b in &glyphs[i + 1..] {
@@ -719,6 +742,7 @@ mod tests {
         }
         let drawn: Vec<_> = PowerUp::ALL
             .into_iter()
+            .chain([PowerUp::Prism])
             .map(|power| pixels(Figure::Glyph(power), 0))
             .collect();
         for (i, a) in drawn.iter().enumerate() {

@@ -42,6 +42,10 @@ pub enum GameEvent {
     OrbBlocked {
         at: Vec2,
     },
+    /// An extra prism broke on stopping an orb.
+    PrismShattered {
+        at: Vec2,
+    },
     /// The hero bounced off a floor with this spin step.
     Bounced {
         at: Vec2,

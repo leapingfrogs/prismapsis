@@ -634,11 +634,11 @@ fn draw_beam(
                 solids,
                 enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
             );
-            let prism = prisms.single().ok().map(|p| p.translation.truncate());
+            let prisms: Vec<Vec2> = prisms.iter().map(|p| p.translation.truncate()).collect();
             trace_from_hero(
                 hero.translation.truncate(),
                 *facing,
-                prism,
+                &prisms,
                 &scene,
                 tuning.split_angle,
                 &BeamLoadout::from_abilities(*abilities, &powerups),
@@ -879,6 +879,7 @@ pub const fn power_up_colour(power: PowerUp) -> Color {
         PowerUp::RapidFire => Color::srgb(1.0, 0.9, 0.3),
         PowerUp::Piercing => Color::srgb(0.35, 0.75, 1.0),
         PowerUp::AirSteering => Color::srgb(1.0, 0.5, 0.78),
+        PowerUp::Prism => Color::srgb(0.82, 0.88, 0.98),
     }
 }
 

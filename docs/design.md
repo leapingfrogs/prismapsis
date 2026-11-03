@@ -35,6 +35,12 @@ starting points to be adjusted in play.
 - **Holding a button freezes it** in place on its orbit, e.g. to park it in
   front as a shield or to line it up with incoming light.
 - The prism **absorbs light** it sweeps through.
+- **Extra prisms** from pickups join it in a **ring of up to five**, always
+  **evenly spaced** round the hero: one joining or breaking sends the
+  others gliding to their new places. Holding and nudging turn the whole
+  ring together. A white beam splits at the first prism it crosses, and
+  split beams pass through the rest. An extra prism that blocks an enemy
+  shot **breaks**, but the last one never does.
 - Controls: hold **Shift** (gamepad **left trigger**) to freeze. It
   brightens while frozen, and its tip always points away from the hero.
 - While frozen, **Q** (gamepad **West**) nudges it anticlockwise and
@@ -159,19 +165,24 @@ starting points to be adjusted in play.
   Each drop holds the first of these the hero has neither collected nor
   got waiting in the level, so a drop is **never one the hero has**, and a
   fresh life rebuilds from the gentlest help up. A pickup left to expire
-  comes round again. Once everything is collected, nothing drops. Pickups
-  placed in a level file hold whatever the level says.
+  comes round again. Pickups placed in a level file hold whatever the
+  level says.
+- **Prisms** are the one pickup held more than once. While the ring has
+  room (counting prisms waiting in the level), 15% of drops are a prism
+  instead, so one can come early; once the six abilities are held, every
+  drop is a prism until the ring is full, and then nothing drops.
 
 ### Abilities
 
 | Ability | Glyph | Effect |
 |---------|-------|--------|
-| Air steering | Arrows right and left (pink) | Spin changes take effect in the air: horizontal speed eases towards the new spin's over a short swing (0.4 s from full one way to full the other) instead of waiting for the next floor, keeping any speed carried from a moving platform. A way out of bouncing helplessly into an enemy. F3 grants or takes it away in dev builds. |
+| Air steering | Arrows right and left (pink) | Spin changes take effect in the air: horizontal speed eases towards the new spin's over a short swing (0.4 s from full one way to full the other) instead of waiting for the next floor, keeping any speed carried from a moving platform. A way out of bouncing helplessly into an enemy. |
 | Rapid fire | Fast-forward (yellow) | Damage ticks and recharge are 1.6× faster. |
 | Anti-gravity | Arrow over a line (violet) | Gravity stops and bouncing ends: **Up/W and Down/S** (d-pad) move the hero directly, while horizontal speed still comes from the spin steps. Floors and ceilings stop it instead of bouncing it. For narrow spaces and precise positioning. |
 | Spread fire | Three rays (green) | Each beam fans into three, 12° apart. |
 | Piercing | Line through a ring (blue) | Beams pass through enemies, hitting everything up to the next wall or the prism. |
 | Rear shot | Double arrow (orange) | A second beam fires backwards. |
+| Extra prism | Triangle (silver) | Another prism joins the ring, up to five; one breaks on blocking an enemy shot, never the last. F3 adds one in dev builds, back to one after five. |
 | Mirror face | *Later* | Upgrades the prism from blocking enemy shots to **reflecting** them back at enemies. |
 | Light nova | *Later* | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). Needs its own button. |
 
@@ -712,7 +723,7 @@ output is committed; the game only ever loads level files.
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
-| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; mirror face, light nova, beam energy upgrades. |
+| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; mirror face, light nova, beam energy upgrades. |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |

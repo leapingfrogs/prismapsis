@@ -179,7 +179,8 @@ enum Hit {
     /// A mirror face, facing this way.
     Mirror(Vec2),
     Target(usize),
-    Prism,
+    /// A prism, centred here.
+    Prism(Vec2),
 }
 
 /// Cast a ray, returning where it stops and what stopped it, and adding the
@@ -189,7 +190,7 @@ fn cast(
     origin: Vec2,
     dir: Vec2,
     scene: &RayScene,
-    prism: Option<Vec2>,
+    prisms: &[Vec2],
     piercing: bool,
     hits: &mut Vec<usize>,
 ) -> (f32, Hit) {
@@ -207,8 +208,11 @@ fn cast(
             consider(Some(t), Hit::Mirror(normal));
         }
     }
-    if let Some(center) = prism {
-        consider(ray_circle(origin, dir, center, PRISM_RADIUS), Hit::Prism);
+    for &center in prisms {
+        consider(
+            ray_circle(origin, dir, center, PRISM_RADIUS),
+            Hit::Prism(center),
+        );
     }
     let target_hits = scene
         .targets
@@ -242,12 +246,12 @@ fn follow(
     mut origin: Vec2,
     mut dir: Vec2,
     colour: BeamColour,
-    prism: Option<Vec2>,
+    prisms: &[Vec2],
     scene: &RayScene,
     piercing: bool,
 ) -> (Hit, Vec2) {
     for reflections in 0..=MAX_REFLECTIONS {
-        let (t, hit) = cast(origin, dir, scene, prism, piercing, &mut trace.hit_targets);
+        let (t, hit) = cast(origin, dir, scene, prisms, piercing, &mut trace.hit_targets);
         let end = origin + dir * t;
         trace.segments.push((origin, end, colour));
         match hit {
@@ -263,17 +267,17 @@ fn follow(
 
 /// Trace the beam fired from `origin` along `dir` (normalised).
 ///
-/// Mirrors reflect it. If it crosses the prism at `prism`, the white beam
-/// ends there and three coloured beams fan out from the prism's far side,
-/// centred on the direction from `hero` (or the last mirror) to the prism.
-/// Split beams don't re-enter the prism. Targets stop each beam unless
+/// Mirrors reflect it. If it crosses one of the `prisms`, the white beam
+/// ends there and three coloured beams fan out from that prism's far side,
+/// centred on the direction from `hero` (or the last mirror) to it. Split
+/// beams don't enter any prism. Targets stop each beam unless
 /// `piercing`.
 #[must_use]
 pub fn trace_beam(
     origin: Vec2,
     dir: Vec2,
     hero: Vec2,
-    prism: Option<Vec2>,
+    prisms: &[Vec2],
     scene: &RayScene,
     split_angle: f32,
     piercing: bool,
@@ -284,11 +288,11 @@ pub fn trace_beam(
         origin,
         dir,
         BeamColour::White,
-        prism,
+        prisms,
         scene,
         piercing,
     );
-    let (Hit::Prism, Some(center)) = (hit, prism) else {
+    let Hit::Prism(center) = hit else {
         return trace;
     };
     let source = if last == origin { hero } else { last };
@@ -301,7 +305,7 @@ pub fn trace_beam(
     ] {
         let split_dir = Vec2::from_angle(angle).rotate(outward);
         let start = center + split_dir * PRISM_RADIUS;
-        follow(&mut trace, start, split_dir, colour, None, scene, piercing);
+        follow(&mut trace, start, split_dir, colour, &[], scene, piercing);
     }
     trace
 }
@@ -382,7 +386,7 @@ pub fn boosted_tuning(
 pub fn trace_from_hero(
     hero: Vec2,
     facing: Facing,
-    prism: Option<Vec2>,
+    prisms: &[Vec2],
     scene: &RayScene,
     split_angle: f32,
     loadout: &BeamLoadout,
@@ -393,7 +397,7 @@ pub fn trace_from_hero(
             hero + dir * HERO_RADIUS,
             dir,
             hero,
-            prism,
+            prisms,
             scene,
             split_angle,
             loadout.piercing,
@@ -524,9 +528,16 @@ pub fn damage_enemies(
         solids,
         enemies.iter().map(|(p, e)| (p.0, e.radius())).collect(),
     );
-    let prism = prisms.single().ok().map(|p| p.0);
+    let prisms: Vec<Vec2> = prisms.iter().map(|p| p.0).collect();
     let loadout = BeamLoadout::from_abilities(*abilities, &powerups);
-    let trace = trace_from_hero(hero.0, *facing, prism, &scene, tuning.split_angle, &loadout);
+    let trace = trace_from_hero(
+        hero.0,
+        *facing,
+        &prisms,
+        &scene,
+        tuning.split_angle,
+        &loadout,
+    );
 
     for mut block in &mut blocks {
         if trace
@@ -573,7 +584,7 @@ mod tests {
             solids: vec![wall_at(500.0), wall_at(300.0)],
             targets: vec![],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, &[], &scene, SPLIT, false);
         assert_eq!(trace.segments.len(), 1);
         let (start, end, colour) = trace.segments[0];
         assert_eq!(start, Vec2::ZERO);
@@ -592,7 +603,7 @@ mod tests {
                 (Vec2::new(200.0, 300.0), 20.0),
             ],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, &[], &scene, SPLIT, false);
         assert_eq!(trace.hit_targets, vec![0]);
         assert!((trace.segments[0].1.x - 180.0).abs() < 1e-3);
     }
@@ -608,7 +619,7 @@ mod tests {
             targets: vec![(Vec2::new(200.0, 0.0), 10.0)],
         };
         let dir = Vec2::new(1.0, -1.0).normalize();
-        let trace = trace_beam(Vec2::ZERO, dir, Vec2::ZERO, None, &scene, SPLIT, false);
+        let trace = trace_beam(Vec2::ZERO, dir, Vec2::ZERO, &[], &scene, SPLIT, false);
         assert_eq!(trace.segments.len(), 2);
         let bounce = trace.segments[0].1;
         assert!(
@@ -630,7 +641,7 @@ mod tests {
             solids: vec![],
             targets: vec![],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, false);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, &[], &scene, SPLIT, false);
         assert_eq!(trace.segments.len(), 1 + MAX_REFLECTIONS);
     }
 
@@ -646,7 +657,7 @@ mod tests {
             Vec2::new(24.0, 0.0),
             Vec2::X,
             Vec2::ZERO,
-            Some(prism),
+            &[prism],
             &scene,
             SPLIT,
             false,
@@ -675,12 +686,38 @@ mod tests {
             Vec2::ZERO,
             Vec2::X,
             Vec2::ZERO,
-            None,
+            &[],
             &RayScene::default(),
             SPLIT,
             false,
         );
         assert!((trace.segments[0].1.x - MAX_BEAM_LENGTH).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_beam_splits_at_the_nearest_prism_and_passes_the_others() {
+        let near = Vec2::new(90.0, 0.0);
+        let far = Vec2::new(300.0, 0.0);
+        let scene = RayScene {
+            mirrors: Vec::new(),
+            solids: vec![wall_at(1000.0)],
+            targets: vec![],
+        };
+        let trace = trace_beam(
+            Vec2::new(24.0, 0.0),
+            Vec2::X,
+            Vec2::ZERO,
+            &[far, near],
+            &scene,
+            SPLIT,
+            false,
+        );
+        assert_eq!(trace.segments.len(), 4);
+        assert!((trace.segments[0].1.x - (near.x - PRISM_RADIUS)).abs() < 1e-3);
+        // The green beam carries straight on through the far prism.
+        let green = trace.segments[2];
+        assert_eq!(green.2, BeamColour::Green);
+        assert!(green.1.x > far.x + PRISM_RADIUS);
     }
 
     #[test]
@@ -695,7 +732,7 @@ mod tests {
             Vec2::new(24.0, 0.0),
             Vec2::X,
             Vec2::ZERO,
-            Some(prism),
+            &[prism],
             &scene,
             SPLIT,
             false,
@@ -729,7 +766,7 @@ mod tests {
             Vec2::new(24.0, 0.0),
             Vec2::X,
             hero,
-            Some(prism),
+            &[prism],
             &RayScene::default(),
             SPLIT,
             false,
@@ -752,7 +789,7 @@ mod tests {
             Vec2::new(24.0, 0.0),
             Vec2::X,
             Vec2::ZERO,
-            Some(prism),
+            &[prism],
             &scene,
             SPLIT,
             false,
@@ -766,7 +803,7 @@ mod tests {
             Vec2::new(24.0, 0.0),
             Vec2::X,
             Vec2::ZERO,
-            Some(Vec2::new(0.0, 90.0)),
+            &[Vec2::new(0.0, 90.0)],
             &RayScene::default(),
             SPLIT,
             false,
@@ -779,7 +816,7 @@ mod tests {
         let trace = trace_from_hero(
             Vec2::ZERO,
             Facing(-1),
-            None,
+            &[],
             &RayScene::default(),
             SPLIT,
             &BeamLoadout::default(),
@@ -799,7 +836,7 @@ mod tests {
                 (Vec2::new(700.0, 0.0), 20.0),
             ],
         };
-        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, None, &scene, SPLIT, true);
+        let trace = trace_beam(Vec2::ZERO, Vec2::X, Vec2::ZERO, &[], &scene, SPLIT, true);
         assert_eq!(trace.hit_targets, vec![0, 1]);
         assert!((trace.segments[0].1.x - 500.0).abs() < 1e-3);
     }
@@ -855,7 +892,7 @@ mod tests {
         let forward_only = trace_from_hero(
             Vec2::ZERO,
             Facing(1),
-            None,
+            &[],
             &scene,
             SPLIT,
             &BeamLoadout::default(),
@@ -868,7 +905,7 @@ mod tests {
             spread: Some(2.0),
             piercing: false,
         };
-        let trace = trace_from_hero(Vec2::ZERO, Facing(1), None, &scene, SPLIT, &loadout);
+        let trace = trace_from_hero(Vec2::ZERO, Facing(1), &[], &scene, SPLIT, &loadout);
         assert_eq!(trace.hit_targets, vec![0, 1]);
         assert_eq!(trace.segments.len(), 6);
     }

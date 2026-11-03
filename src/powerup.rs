@@ -34,6 +34,10 @@ pub enum PowerUp {
     Piercing,
     /// Spin changes take effect in the air.
     AirSteering,
+    /// Another prism joins the ring round the hero, up to `MAX_PRISMS`.
+    /// Unlike the others it can be held more than once, so it isn't in
+    /// `ALL`.
+    Prism,
 }
 
 impl PowerUp {
@@ -53,22 +57,51 @@ impl PowerUp {
     }
 }
 
-/// The abilities the hero currently has.
+/// The most prisms the hero can have.
+pub const MAX_PRISMS: u8 = 5;
+
+/// The abilities the hero currently has, and how many prisms beyond the
+/// first.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Abilities(u8);
+pub struct Abilities {
+    held: u8,
+    extra_prisms: u8,
+}
 
 impl Abilities {
+    /// Whether the hero has `power`; for `Prism`, any beyond the first.
     #[must_use]
     pub const fn has(self, power: PowerUp) -> bool {
-        self.0 & power.bit() != 0
+        match power {
+            PowerUp::Prism => self.extra_prisms > 0,
+            _ => self.held & power.bit() != 0,
+        }
     }
 
+    /// Give the hero `power`; for `Prism`, one more up to `MAX_PRISMS`.
     pub const fn grant(&mut self, power: PowerUp) {
-        self.0 |= power.bit();
+        match power {
+            PowerUp::Prism => {
+                if self.prisms() < MAX_PRISMS {
+                    self.extra_prisms += 1;
+                }
+            }
+            _ => self.held |= power.bit(),
+        }
     }
 
+    /// Take `power` away; for `Prism`, one, but never the last.
     pub const fn revoke(&mut self, power: PowerUp) {
-        self.0 &= !power.bit();
+        match power {
+            PowerUp::Prism => self.extra_prisms = self.extra_prisms.saturating_sub(1),
+            _ => self.held &= !power.bit(),
+        }
+    }
+
+    /// How many prisms circle the hero.
+    #[must_use]
+    pub const fn prisms(self) -> u8 {
+        1 + self.extra_prisms
     }
 
     /// Abilities not collected yet, in `PowerUp::ALL` order.
@@ -85,6 +118,9 @@ pub struct PowerUpTuning {
     pub drop_chance: f32,
     /// How long a pickup stays before vanishing (seconds).
     pub drop_lifetime: f32,
+    /// Of drops while the ring has room, the share (0 to 1) that are a prism
+    /// rather than the next power-up.
+    pub prism_share: f32,
     /// Rapid fire multiplies damage tick rate and recharge rate by this.
     pub rapid_fire_boost: f32,
     /// Angle between the centre beam and each outer beam of spread fire
@@ -97,6 +133,7 @@ impl Default for PowerUpTuning {
         Self {
             drop_chance: 0.2,
             drop_lifetime: 8.0,
+            prism_share: 0.15,
             rapid_fire_boost: 1.6,
             spread_angle: 12.0,
         }
@@ -155,17 +192,30 @@ pub fn next_power_up(abilities: Abilities, waiting: &[PowerUp]) -> Option<PowerU
     abilities.missing().find(|power| !waiting.contains(power))
 }
 
-/// Roll for a drop: the next power-up with probability `chance`, and none
-/// once there's nothing left to offer.
+/// Roll for a drop, with probability `drop_chance`.
+///
+/// While the ring has room (counting prisms waiting in the level), a
+/// `prism_share` of drops are a
+/// prism, and so is every drop once the other power-ups are all held;
+/// otherwise it's the next power-up. Nothing drops once there's nothing
+/// left to offer.
 pub fn roll_drop(
     rng: &mut DropRng,
     abilities: Abilities,
     waiting: &[PowerUp],
-    chance: f32,
+    tuning: &PowerUpTuning,
 ) -> Option<PowerUp> {
-    (rng.next_f32() < chance)
-        .then(|| next_power_up(abilities, waiting))
-        .flatten()
+    let drops = rng.next_f32() < tuning.drop_chance;
+    let prism = rng.next_f32() < tuning.prism_share;
+    if !drops {
+        return None;
+    }
+    let waiting_prisms = waiting.iter().filter(|&&p| p == PowerUp::Prism).count();
+    let room = usize::from(abilities.prisms()) + waiting_prisms < usize::from(MAX_PRISMS);
+    match next_power_up(abilities, waiting) {
+        Some(next) if !(room && prism) => Some(next),
+        _ => room.then_some(PowerUp::Prism),
+    }
 }
 
 /// Whether a pickup of this `age` is drawn this frame: steady, then blinking
@@ -304,23 +354,72 @@ mod tests {
             next(abilities, &[PowerUp::RapidFire, PowerUp::AntiGravity]),
             Some(PowerUp::Piercing)
         );
-        // With everything collected, nothing drops.
+        // With everything collected, only prisms drop, until the ring is
+        // full.
         for power in PowerUp::ALL {
             abilities.grant(power);
         }
         assert_eq!(next(abilities, &[]), None);
         let mut rng = DropRng::default();
-        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 1.0).is_none()));
+        let always = tuning(1.0, 0.0);
+        assert_eq!(
+            roll_drop(&mut rng, abilities, &[], &always),
+            Some(PowerUp::Prism)
+        );
+        for _ in 0..MAX_PRISMS {
+            abilities.grant(PowerUp::Prism);
+        }
+        assert_eq!(abilities.prisms(), MAX_PRISMS);
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], &always).is_none()));
+    }
+
+    fn tuning(drop_chance: f32, prism_share: f32) -> PowerUpTuning {
+        PowerUpTuning {
+            drop_chance,
+            prism_share,
+            ..default()
+        }
+    }
+
+    #[test]
+    fn some_drops_are_prisms_while_the_ring_has_room() {
+        let mut rng = DropRng::default();
+        let mut abilities = Abilities::default();
+        let drops: Vec<_> = (0..1000)
+            .filter_map(|_| roll_drop(&mut rng, abilities, &[], &tuning(1.0, 0.15)))
+            .collect();
+        let prisms = drops.iter().filter(|&&p| p == PowerUp::Prism).count();
+        assert!((100..200).contains(&prisms), "got {prisms} prisms");
+        assert!(drops.contains(&PowerUp::AirSteering));
+        // Prisms waiting in the level fill the ring's room.
+        abilities.grant(PowerUp::Prism);
+        let waiting = [PowerUp::Prism; 3];
+        assert!((0..100).all(|_| {
+            roll_drop(&mut rng, abilities, &waiting, &tuning(1.0, 1.0)) != Some(PowerUp::Prism)
+        }));
+    }
+
+    #[test]
+    fn prisms_never_fall_below_one() {
+        let mut abilities = Abilities::default();
+        abilities.revoke(PowerUp::Prism);
+        assert_eq!(abilities.prisms(), 1);
+        assert!(!abilities.has(PowerUp::Prism));
+        abilities.grant(PowerUp::Prism);
+        assert_eq!(abilities.prisms(), 2);
+        assert!(abilities.has(PowerUp::Prism));
     }
 
     #[test]
     fn drop_chance_controls_how_often_drops_happen() {
         let mut rng = DropRng::default();
         let abilities = Abilities::default();
-        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 0.0).is_none()));
-        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 1.0).is_some()));
+        let never = tuning(0.0, 0.15);
+        let always = tuning(1.0, 0.15);
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], &never).is_none()));
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], &always).is_some()));
         let drops = (0..1000)
-            .filter(|_| roll_drop(&mut rng, abilities, &[], 0.2).is_some())
+            .filter(|_| roll_drop(&mut rng, abilities, &[], &tuning(0.2, 0.15)).is_some())
             .count();
         assert!((120..280).contains(&drops), "got {drops} drops");
     }

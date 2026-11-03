@@ -145,12 +145,17 @@ fn sprite_preview() -> Canvas {
         ],
         vec![(Figure::Prism, 0, Color::srgba(0.8, 0.92, 1.0, 0.85))],
     ];
-    cells.extend(PowerUp::ALL.map(|power| {
-        vec![
-            (Figure::Bubble, 0, power_up_colour(power)),
-            (Figure::Glyph(power), 0, white),
-        ]
-    }));
+    cells.extend(
+        PowerUp::ALL
+            .into_iter()
+            .chain([PowerUp::Prism])
+            .map(|power| {
+                vec![
+                    (Figure::Bubble, 0, power_up_colour(power)),
+                    (Figure::Glyph(power), 0, white),
+                ]
+            }),
+    );
     let colours = [
         None,
         Some(Primary::Red),
