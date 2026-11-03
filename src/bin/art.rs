@@ -2,7 +2,8 @@
 //!
 //! - `art` paints every theme's tilesets (walls, panels and features), the
 //!   sprite sheet, the phantom tileset, the beam and exit art, the HUD's
-//!   tube and the touch buttons' symbols into `assets/art`.
+//!   tube and the touch buttons' symbols into `assets/art`, and the game's
+//!   icon into `assets/icon`.
 //! - `art --check` changes nothing and fails if a committed image is out of
 //!   date.
 //! - `art preview DIR` writes a sample of each theme to DIR, drawn
@@ -15,7 +16,7 @@ use std::process::ExitCode;
 use bevy::color::{Color, ColorToComponents};
 use prismapsis::art::paint::{self, Canvas, Kind, Theme};
 use prismapsis::art::sprites::{self, CELL_PX, Figure};
-use prismapsis::art::{backdrops, features, glow, hud, menu, phantoms, touch};
+use prismapsis::art::{backdrops, features, glow, hud, icon, menu, phantoms, touch};
 use prismapsis::enemy::EnemyKind;
 use prismapsis::light::Primary;
 use prismapsis::powerup::PowerUp;
@@ -97,9 +98,16 @@ fn generate(assets: &Path, check: bool) -> Result<bool, String> {
         (menu::PANEL_PATH.to_owned(), menu::panel()),
         (touch::GLYPHS_PATH.to_owned(), touch::glyphs()),
     ]);
-    for (relative, canvas) in images {
+    let mut files = images
+        .chain(icon::images())
+        .map(|(relative, canvas)| Ok((relative, png(&canvas)?)))
+        .collect::<Result<Vec<_>, String>>()?;
+    files.push((
+        icon::ICO_PATH.to_owned(),
+        icon::ico().map_err(|e| e.to_string())?,
+    ));
+    for (relative, bytes) in files {
         let path = assets.join(&relative);
-        let bytes = png(&canvas)?;
         let shown = Path::new("assets").join(&relative);
         if std::fs::read(&path).is_ok_and(|old| old == bytes) {
             println!("{}: up to date", shown.display());

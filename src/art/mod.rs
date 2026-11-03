@@ -11,6 +11,7 @@ pub mod features;
 pub mod figures;
 pub mod glow;
 pub mod hud;
+pub mod icon;
 pub mod menu;
 pub mod paint;
 pub mod phantoms;

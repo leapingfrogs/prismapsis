@@ -21,7 +21,7 @@ pub const PANEL_PX: u32 = 96;
 pub const PANEL_BORDER_PX: f32 = 32.0;
 
 /// The colours the prism splits the light into, top to bottom.
-const RAYS: [[f32; 3]; 3] = [[1.0, 0.32, 0.3], [0.35, 1.0, 0.45], [0.35, 0.55, 1.0]];
+pub(super) const RAYS: [[f32; 3]; 3] = [[1.0, 0.32, 0.3], [0.35, 1.0, 0.45], [0.35, 0.55, 1.0]];
 
 fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
     let t = ((x - from) / (to - from)).clamp(0.0, 1.0);
@@ -30,19 +30,19 @@ fn smoothstep(from: f32, to: f32, x: f32) -> f32 {
 
 /// How much of a pixel lies inside, from its signed distance to the edge
 /// in pixels (negative inside).
-fn cover(distance: f32) -> f32 {
+pub(super) fn cover(distance: f32) -> f32 {
     (0.5 - distance).clamp(0.0, 1.0)
 }
 
 /// Distance from `p` to the segment from `a` to `b`.
-fn segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+pub(super) fn segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
     let ab = b - a;
     let t = ((p - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
     p.distance(a + ab * t)
 }
 
 /// `top` laid over `under`, both straight-alpha colour.
-fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
+pub(super) fn over(top: [f32; 4], under: [f32; 4]) -> [f32; 4] {
     let alpha = top[3] + under[3] * (1.0 - top[3]);
     if alpha <= f32::EPSILON {
         return [0.0; 4];

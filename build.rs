@@ -5,6 +5,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 fn main() {
+    embed_windows_icon();
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels");
     let campaign = dir.join("campaign.toml");
     println!("cargo::rerun-if-changed={}", campaign.display());
@@ -37,3 +38,19 @@ fn main() {
     let out = Path::new(&std::env::var("OUT_DIR").unwrap_or_default()).join("campaign.rs");
     std::fs::write(&out, code).unwrap_or_else(|e| panic!("{}: {e}", out.display()));
 }
+
+/// Give the Windows program its icon, as Explorer and the taskbar show it.
+#[cfg(windows)]
+fn embed_windows_icon() {
+    if std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows") {
+        let icon = "assets/icon/prismapsis.ico";
+        println!("cargo::rerun-if-changed={icon}");
+        winresource::WindowsResource::new()
+            .set_icon(icon)
+            .compile()
+            .unwrap_or_else(|e| panic!("{icon}: {e}"));
+    }
+}
+
+#[cfg(not(windows))]
+const fn embed_windows_icon() {}

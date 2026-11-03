@@ -461,6 +461,11 @@ output is committed; the game only ever loads level files.
   and, with no configuration directory, settings are kept as the same TOML
   in the browser's local storage, under `prismapsis.settings`.
 - `just web` builds it into `dist/web`; `just web-serve` serves it locally.
+- **The icon** is painted by `just art` into `assets/icon`: square tiles for
+  home screens and the web manifest, and a rounded version for the browser
+  tab and the desktop. On Windows it's embedded in the program (`build.rs`)
+  and set on the window; on X11 it's set on the window. Wayland and macOS
+  need a desktop file or an app bundle, which the releases don't include.
 
 ## Touch controls
 
