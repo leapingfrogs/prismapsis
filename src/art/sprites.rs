@@ -57,7 +57,7 @@ pub enum Figure {
 
 impl Figure {
     /// Every figure, in sheet order.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::HeroSurface,
         Self::HeroShade,
         Self::Prism,
@@ -67,6 +67,7 @@ impl Figure {
         Self::Glyph(PowerUp::Spread),
         Self::Glyph(PowerUp::RapidFire),
         Self::Glyph(PowerUp::Piercing),
+        Self::Glyph(PowerUp::AirSteering),
         Self::Mote,
         Self::Lens,
         Self::Orb,
@@ -378,6 +379,29 @@ pub fn glyph_parts(power: PowerUp) -> Vec<(GlyphPart, Vec2, f32)> {
         PowerUp::Piercing => vec![
             (GlyphPart::Ring(s * 0.55), Vec2::ZERO, 0.0),
             (GlyphPart::Bar(s * 1.9, STROKE), Vec2::ZERO, 0.0),
+        ],
+        // Arrows right above and left below: turning round.
+        PowerUp::AirSteering => vec![
+            (
+                GlyphPart::Bar(s * 1.2, STROKE),
+                Vec2::new(-s * 0.2, s * 0.4),
+                0.0,
+            ),
+            (
+                GlyphPart::Arrowhead(s * 0.6),
+                Vec2::new(s * 0.5, s * 0.4),
+                0.0,
+            ),
+            (
+                GlyphPart::Bar(s * 1.2, STROKE),
+                Vec2::new(s * 0.2, -s * 0.4),
+                0.0,
+            ),
+            (
+                GlyphPart::Arrowhead(s * 0.6),
+                Vec2::new(-s * 0.5, -s * 0.4),
+                PI,
+            ),
         ],
     }
 }

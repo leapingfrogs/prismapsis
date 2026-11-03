@@ -32,15 +32,20 @@ pub enum PowerUp {
     RapidFire,
     /// Beams pass through enemies.
     Piercing,
+    /// Spin changes take effect in the air.
+    AirSteering,
 }
 
 impl PowerUp {
-    pub const ALL: [Self; 5] = [
-        Self::AntiGravity,
-        Self::RearShot,
-        Self::Spread,
+    /// Every power-up, in the order drops offer them: control of movement
+    /// first, then firepower.
+    pub const ALL: [Self; 6] = [
+        Self::AirSteering,
         Self::RapidFire,
+        Self::AntiGravity,
+        Self::Spread,
         Self::Piercing,
+        Self::RearShot,
     ];
 
     const fn bit(self) -> u8 {
@@ -143,29 +148,24 @@ impl DropRng {
     }
 }
 
-/// Which power-up a drop holds, from a `roll` in `0.0..1.0`: one the hero
-/// doesn't have yet if possible, otherwise any.
+/// Which power-up a drop holds: the first in `PowerUp::ALL` the hero has
+/// neither collected nor got waiting in the level, so never one it has.
 #[must_use]
-pub fn choose_power_up(abilities: Abilities, roll: f32) -> PowerUp {
-    let missing: Vec<_> = abilities.missing().collect();
-    let pool: &[PowerUp] = if missing.is_empty() {
-        &PowerUp::ALL
-    } else {
-        &missing
-    };
-    // `roll` is below 1, so the index stays in range; `min` guards rounding.
-    #[allow(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        clippy::cast_precision_loss
-    )]
-    let index = ((roll * pool.len() as f32) as usize).min(pool.len() - 1);
-    pool[index]
+pub fn next_power_up(abilities: Abilities, waiting: &[PowerUp]) -> Option<PowerUp> {
+    abilities.missing().find(|power| !waiting.contains(power))
 }
 
-/// Roll for a drop: `Some` power-up with probability `chance`.
-pub fn roll_drop(rng: &mut DropRng, abilities: Abilities, chance: f32) -> Option<PowerUp> {
-    (rng.next_f32() < chance).then(|| choose_power_up(abilities, rng.next_f32()))
+/// Roll for a drop: the next power-up with probability `chance`, and none
+/// once there's nothing left to offer.
+pub fn roll_drop(
+    rng: &mut DropRng,
+    abilities: Abilities,
+    waiting: &[PowerUp],
+    chance: f32,
+) -> Option<PowerUp> {
+    (rng.next_f32() < chance)
+        .then(|| next_power_up(abilities, waiting))
+        .flatten()
 }
 
 /// Whether a pickup of this `age` is drawn this frame: steady, then blinking
@@ -287,30 +287,40 @@ mod tests {
     }
 
     #[test]
-    fn drops_favour_missing_abilities() {
+    fn drops_offer_movement_then_firepower_and_never_a_repeat() {
         let mut abilities = Abilities::default();
+        let next = |abilities, waiting: &[PowerUp]| next_power_up(abilities, waiting);
+        assert_eq!(next(abilities, &[]), Some(PowerUp::AirSteering));
+        abilities.grant(PowerUp::AirSteering);
+        assert_eq!(next(abilities, &[]), Some(PowerUp::RapidFire));
+        // One waiting in the level isn't offered again.
+        assert_eq!(
+            next(abilities, &[PowerUp::RapidFire]),
+            Some(PowerUp::AntiGravity)
+        );
+        // A later one held doesn't hold up the earlier ones.
+        abilities.grant(PowerUp::Spread);
+        assert_eq!(
+            next(abilities, &[PowerUp::RapidFire, PowerUp::AntiGravity]),
+            Some(PowerUp::Piercing)
+        );
+        // With everything collected, nothing drops.
         for power in PowerUp::ALL {
-            if power != PowerUp::Piercing {
-                abilities.grant(power);
-            }
+            abilities.grant(power);
         }
-        for roll in [0.0, 0.5, 0.999] {
-            assert_eq!(choose_power_up(abilities, roll), PowerUp::Piercing);
-        }
-        abilities.grant(PowerUp::Piercing);
-        // With everything collected, any power-up can drop.
-        assert_eq!(choose_power_up(abilities, 0.0), PowerUp::ALL[0]);
-        assert_eq!(choose_power_up(abilities, 0.999), PowerUp::ALL[4]);
+        assert_eq!(next(abilities, &[]), None);
+        let mut rng = DropRng::default();
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 1.0).is_none()));
     }
 
     #[test]
     fn drop_chance_controls_how_often_drops_happen() {
         let mut rng = DropRng::default();
         let abilities = Abilities::default();
-        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, 0.0).is_none()));
-        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, 1.0).is_some()));
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 0.0).is_none()));
+        assert!((0..100).all(|_| roll_drop(&mut rng, abilities, &[], 1.0).is_some()));
         let drops = (0..1000)
-            .filter(|_| roll_drop(&mut rng, abilities, 0.2).is_some())
+            .filter(|_| roll_drop(&mut rng, abilities, &[], 0.2).is_some())
             .count();
         assert!((120..280).contains(&drops), "got {drops} drops");
     }

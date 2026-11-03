@@ -24,6 +24,9 @@ pub struct BounceTuning {
     pub wall_flips_spin: bool,
     /// Vertical speed while hovering with anti-gravity (world units/s).
     pub hover_speed: f32,
+    /// Seconds air steering takes to swing horizontal speed from full spin
+    /// one way to full spin the other.
+    pub air_steer_time: f32,
 }
 
 impl Default for BounceTuning {
@@ -34,6 +37,7 @@ impl Default for BounceTuning {
             speed_per_step: 90.0,
             wall_flips_spin: true,
             hover_speed: 360.0,
+            air_steer_time: 0.4,
         }
     }
 }
@@ -49,6 +53,12 @@ impl BounceTuning {
     #[must_use]
     pub fn horizontal_speed(&self, spin: i8) -> f32 {
         f32::from(spin) * self.speed_per_step
+    }
+
+    /// How fast air steering changes horizontal speed (world units/s²).
+    #[must_use]
+    pub fn air_steer_rate(&self) -> f32 {
+        2.0 * f32::from(MAX_SPIN) * self.speed_per_step / self.air_steer_time.max(0.01)
     }
 }
 

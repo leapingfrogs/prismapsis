@@ -1,5 +1,8 @@
 //! Developer tools, compiled only with the `dev` feature: a live tuning panel
-//! for bounce parameters. Toggle with F1 or backtick; R resets the hero; F2 turns bloom on and off.
+//! for bounce parameters.
+//!
+//! F1 or backtick shows and hides the panel; R resets the hero; F2 turns
+//! bloom on and off; F3 grants or takes away air steering.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::system::SystemParam;
@@ -11,7 +14,7 @@ use crate::art::paint::themes;
 use crate::art::tiles::ThemeChoice;
 use crate::beam::BeamTuning;
 use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
-use crate::hero::{Hero, Position, PreviousPosition, Spin, Velocity};
+use crate::hero::{Carry, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::level::{Campaign, CurrentLevel, RespawnPoint};
 use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
@@ -35,7 +38,10 @@ impl Plugin for DevToolsPlugin {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(PanelVisible(true))
             .init_resource::<AuditionChoice>()
-            .add_systems(Update, (toggle_panel, reset_hero, toggle_bloom))
+            .add_systems(
+                Update,
+                (toggle_panel, reset_hero, toggle_bloom, toggle_air_steering),
+            )
             .add_systems(EguiPrimaryContextPass, tuning_panel);
     }
 }
@@ -84,6 +90,17 @@ fn toggle_bloom(keys: Res<ButtonInput<KeyCode>>, mut bloom: ResMut<BloomOn>) {
     }
 }
 
+/// F3 grants or takes away air steering.
+fn toggle_air_steering(keys: Res<ButtonInput<KeyCode>>, mut abilities: ResMut<Abilities>) {
+    if keys.just_pressed(KeyCode::F3) {
+        if abilities.has(PowerUp::AirSteering) {
+            abilities.revoke(PowerUp::AirSteering);
+        } else {
+            abilities.grant(PowerUp::AirSteering);
+        }
+    }
+}
+
 fn toggle_panel(keys: Res<ButtonInput<KeyCode>>, mut visible: ResMut<PanelVisible>) {
     if keys.any_just_pressed([KeyCode::F1, KeyCode::Backquote]) {
         visible.0 = !visible.0;
@@ -99,6 +116,7 @@ fn reset_hero(
             &mut PreviousPosition,
             &mut Velocity,
             &mut Spin,
+            &mut Carry,
         ),
         With<Hero>,
     >,
@@ -106,12 +124,13 @@ fn reset_hero(
     if !keys.just_pressed(KeyCode::KeyR) {
         return;
     }
-    for (mut pos, mut prev, mut vel, mut spin) in &mut heroes {
+    for (mut pos, mut prev, mut vel, mut spin, mut carry) in &mut heroes {
         // Move both so the reset snaps rather than sweeping across the room.
         *pos = Position(respawn.0);
         *prev = PreviousPosition(respawn.0);
         *vel = Velocity::default();
         *spin = Spin::default();
+        *carry = Carry::default();
     }
 }
 
@@ -196,6 +215,7 @@ fn tuning_panel(
             ui.label("←/→ or A/D: spin   R: reset hero");
             ui.label("Space: fire   Shift: freeze prism   Q/E while frozen: nudge");
             ui.label("↑/↓ or W/S: hover (with anti-gravity)");
+            ui.label("F2: bloom   F3: air steering");
         });
     Ok(())
 }
@@ -206,6 +226,7 @@ fn movement_section(ui: &mut egui::Ui, tuning: &mut BounceTuning) {
     ui.add(egui::Slider::new(&mut tuning.speed_per_step, 10.0..=300.0).text("speed per step"));
     ui.checkbox(&mut tuning.wall_flips_spin, "walls flip spin");
     ui.add(egui::Slider::new(&mut tuning.hover_speed, 50.0..=900.0).text("hover speed"));
+    ui.add(egui::Slider::new(&mut tuning.air_steer_time, 0.1..=1.5).text("air steer swing (s)"));
 }
 
 fn prism_section(ui: &mut egui::Ui, tuning: &mut PrismTuning, frozen: bool) {

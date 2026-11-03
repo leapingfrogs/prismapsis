@@ -135,6 +135,7 @@ pub const fn power_up_degree(power: PowerUp) -> i32 {
         PowerUp::Piercing => 2,
         PowerUp::AntiGravity => 3,
         PowerUp::RapidFire => 4,
+        PowerUp::AirSteering => 5,
     }
 }
 
