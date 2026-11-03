@@ -32,10 +32,12 @@ pub enum Glyph {
     Unlocked,
     /// A closed lock, for hold while it is.
     Locked,
+    /// A ring with rays all round, for the light nova.
+    Nova,
 }
 
 impl Glyph {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Left,
         Self::Right,
         Self::Up,
@@ -44,6 +46,7 @@ impl Glyph {
         Self::Pause,
         Self::Unlocked,
         Self::Locked,
+        Self::Nova,
     ];
 
     /// Its place in the strip.
@@ -74,6 +77,7 @@ impl Glyph {
             Self::Pause => bars(p),
             Self::Unlocked => lock(p, LIFT),
             Self::Locked => lock(p, 0.0),
+            Self::Nova => nova(p),
         }
     }
 }
@@ -120,6 +124,19 @@ fn burst(p: Vec2) -> f32 {
         })
         .fold(f32::MAX, f32::min);
     rays.min(p.length() - 0.22)
+}
+
+/// A ring with rays all round it, long and short in turn.
+fn nova(p: Vec2) -> f32 {
+    let ring = (p.length() - 0.3).abs() - STROKE * 0.8;
+    let rays = (0..8u8)
+        .map(|k| {
+            let direction = Vec2::from_angle(f32::from(k) * std::f32::consts::FRAC_PI_4);
+            let length = if k % 2 == 0 { 0.84 } else { 0.7 };
+            segment(p, direction * 0.52, direction * length) - STROKE * 0.7
+        })
+        .fold(f32::MAX, f32::min);
+    ring.min(rays)
 }
 
 /// Two upright bars.

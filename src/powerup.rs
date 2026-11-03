@@ -34,6 +34,8 @@ pub enum PowerUp {
     Piercing,
     /// Spin changes take effect in the air.
     AirSteering,
+    /// A burst of light that clears nearby enemies, then recharges.
+    LightNova,
     /// Another prism joins the ring round the hero, up to `MAX_PRISMS`.
     /// Unlike the others it can be held more than once, so it isn't in
     /// `ALL`.
@@ -43,13 +45,14 @@ pub enum PowerUp {
 impl PowerUp {
     /// Every power-up, in the order drops offer them: control of movement
     /// first, then firepower.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::AirSteering,
         Self::RapidFire,
         Self::AntiGravity,
         Self::Spread,
         Self::Piercing,
         Self::RearShot,
+        Self::LightNova,
     ];
 
     const fn bit(self) -> u8 {

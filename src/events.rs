@@ -46,6 +46,14 @@ pub enum GameEvent {
     PrismShattered {
         at: Vec2,
     },
+    /// The hero set off a light nova.
+    NovaFired {
+        at: Vec2,
+    },
+    /// The light nova has recharged.
+    NovaReady {
+        at: Vec2,
+    },
     /// The hero bounced off a floor with this spin step.
     Bounced {
         at: Vec2,

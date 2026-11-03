@@ -95,6 +95,7 @@ impl Plugin for PresentationPlugin {
                 crate::art::figures::FiguresPlugin,
                 hud::HudPlugin,
                 crate::droplets::DropletsPlugin,
+                crate::nova_view::NovaViewPlugin,
             ));
     }
 }
@@ -422,6 +423,8 @@ const BEAM_LIGHT_STRENGTH: f32 = 1.3;
 const EXIT_LIGHT_REACH: (f32, f32) = (380.0, 0.9);
 const LAMP_LIGHT: (f32, f32) = (220.0, 0.6);
 const MOTE_LIGHT_REACH: (f32, f32) = (150.0, 0.6);
+/// How far past its edge a spreading nova lights, and how strongly.
+const NOVA_LIGHT: (f32, f32) = (150.0, 1.4);
 
 /// Beam pieces that light the walls at most, so other lights still fit.
 const BEAM_LIGHTS: usize = 4;
@@ -447,6 +450,7 @@ fn gather_lights(
     exits: Query<&crate::light::ExitGate>,
     checkpoints: Query<&Checkpoint>,
     motes: Query<(&Transform, &Enemy, &Colour), Without<Hero>>,
+    nova: Res<crate::nova::Nova>,
 ) {
     use crate::art::tiles::WorldLight;
     let point = |at: Vec2, colour: Vec3, radius: f32| WorldLight {
@@ -469,6 +473,16 @@ fn gather_lights(
     let hero = heroes.single().ok().map(|t| t.translation.truncate());
     if let Some(at) = hero {
         lights.push(point(at, Vec3::splat(HERO_LIGHT.1), HERO_LIGHT.0));
+    }
+    // A spreading nova lights everything it reaches, fading as it goes.
+    if let Some(burst) = &nova.burst {
+        let fade = 1.0 - burst.age / crate::nova::NOVA_SPREAD;
+        let (reach, strength) = NOVA_LIGHT;
+        lights.push(point(
+            burst.centre,
+            Vec3::splat(strength * fade.max(0.0)),
+            burst.radius() + reach,
+        ));
     }
     let open = wash.of(crate::light::Hue::White);
     if open > 0.0 {
@@ -880,6 +894,7 @@ pub const fn power_up_colour(power: PowerUp) -> Color {
         PowerUp::Piercing => Color::srgb(0.35, 0.75, 1.0),
         PowerUp::AirSteering => Color::srgb(1.0, 0.5, 0.78),
         PowerUp::Prism => Color::srgb(0.82, 0.88, 0.98),
+        PowerUp::LightNova => Color::srgb(0.3, 0.95, 0.88),
     }
 }
 

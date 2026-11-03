@@ -130,7 +130,7 @@ mod tests {
             )))
             .add_plugins(SimulationPlugin)
             .add_systems(Startup, spawn_overlay)
-            .add_systems(Update, show_overlay);
+            .add_systems(Update, show_overlay.after(toggle_pause));
         app
     }
 

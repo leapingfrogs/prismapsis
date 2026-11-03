@@ -2,7 +2,8 @@
 //! for bounce parameters.
 //!
 //! F1 or backtick shows and hides the panel; R resets the hero; F2 turns
-//! bloom on and off; F3 adds a prism, back to one after the most.
+//! bloom on and off; F3 adds a prism, back to one after the most; F4
+//! grants the light nova, ready.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::system::SystemParam;
@@ -17,6 +18,7 @@ use crate::enemy::{EnemyTuning, Kills, Lives, ResetRoom};
 use crate::hero::{Carry, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::level::{Campaign, CurrentLevel, RespawnPoint};
 use crate::light::{LightTuning, Primary, Spectrum};
+use crate::nova::Nova;
 use crate::physics::{BounceTuning, MAX_SPIN};
 use crate::powerup::{Abilities, MAX_PRISMS, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
@@ -38,7 +40,16 @@ impl Plugin for DevToolsPlugin {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(PanelVisible(true))
             .init_resource::<AuditionChoice>()
-            .add_systems(Update, (toggle_panel, reset_hero, toggle_bloom, add_prism))
+            .add_systems(
+                Update,
+                (
+                    toggle_panel,
+                    reset_hero,
+                    toggle_bloom,
+                    add_prism,
+                    grant_nova,
+                ),
+            )
             .add_systems(EguiPrimaryContextPass, tuning_panel);
     }
 }
@@ -97,6 +108,18 @@ fn add_prism(keys: Res<ButtonInput<KeyCode>>, mut abilities: ResMut<Abilities>) 
                 abilities.revoke(PowerUp::Prism);
             }
         }
+    }
+}
+
+/// F4 grants the light nova, ready to use.
+fn grant_nova(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut abilities: ResMut<Abilities>,
+    mut nova: ResMut<Nova>,
+) {
+    if keys.just_pressed(KeyCode::F4) {
+        abilities.grant(PowerUp::LightNova);
+        nova.recharge = 0.0;
     }
 }
 
@@ -214,7 +237,7 @@ fn tuning_panel(
             ui.label("←/→ or A/D: spin   R: reset hero");
             ui.label("Space: fire   Shift: freeze prism   Q/E while frozen: nudge");
             ui.label("↑/↓ or W/S: hover (with anti-gravity)");
-            ui.label("F2: bloom   F3: add a prism");
+            ui.label("F2: bloom   F3: add a prism   F4: light nova");
         });
     Ok(())
 }
