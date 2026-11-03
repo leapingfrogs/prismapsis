@@ -135,8 +135,7 @@ starting points to be adjusted in play.
 - **Threat:** touching any enemy costs a life. **Some types shoot** slow
   projectiles at the hero.
 - **The prism always blocks enemy shots**, so its orbit works as a rotating
-  shield and freezing it in place covers one side. (The mirror-face
-  power-up upgrades this from blocking to reflecting.)
+  shield and freezing it in place covers one side.
 - Enemy shots are stopped by solids.
 - **On defeat**, enemies burst and may leave a power-up (see below). Light
   arrives in iteration 5.
@@ -183,7 +182,6 @@ starting points to be adjusted in play.
 | Piercing | Line through a ring (blue) | Beams pass through enemies, hitting everything up to the next wall or the prism. |
 | Rear shot | Double arrow (orange) | A second beam fires backwards. |
 | Extra prism | Triangle (silver) | Another prism joins the ring, up to five; one breaks on blocking an enemy shot, never the last. F3 adds one in dev builds, back to one after five. |
-| Mirror face | *Later* | Upgrades the prism from blocking enemy shots to **reflecting** them back at enemies. |
 | Light nova | *Later* | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). Needs its own button. |
 
 Weapon power-ups are **separate pickups that stack**: rear shot, spread,
@@ -723,7 +721,7 @@ output is committed; the game only ever loads level files.
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
-| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; mirror face, light nova, beam energy upgrades. |
+| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; light nova; beam energy upgrades. (Mirror face, reflecting shots back, was dropped: the ring of prisms covers shielding.) |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |
@@ -732,11 +730,15 @@ output is committed; the game only ever loads level files.
 | 6c-1 | Solvability | Bounce reach model using the game physics; solvability checker over landings and restored colours; `level-check` proves levels can be finished; `campaign.toml` sets the play order. |
 | 6c-2 | Generator | Seeded generator for wide and tall levels: rhythm terrain patterns, colour gates, lenses, checkpoints and hidden pickups; comfort and gate-bypass checks; per-stage random streams; `just levelgen` and an up-to-date check; a first campaign of eight generated levels. |
 | 6c-3 | Generated features | Recipes opt into one-way platforms, springs, mud and mirrors; placement rules for wide and tall levels that keep gates honest; layouts must include every feature asked for; the campaign introduces them in turn. |
+| 6c-4 | Changing tiles in the campaign | Generator features for crumbling platforms, moving platforms on tracks and colour-breakable walls (wide levels only), drawing on the random streams only when asked, so earlier levels stay the same; levels 9 to 15 bring them in after the first eight, which are unchanged. |
 | 7a | Themed tiles | `just art` with a first theme; dual-grid edge and corner tiles for walls and scenery panels replacing flat rectangles; the hue-aware colour filter; `just art` and an up-to-date check. |
 | 7b | Themes | More themes following the campaign order, each with its own background colour: Crystal Caverns, then the Observatory. |
 | 7c | Sprites | A generated grey sprite sheet tinted in the game: the hero with a spinning surface under fixed shading and a squash on each bounce; twinkling motes, glinting lenses and glowing orbs; glass pickup bubbles round their glyphs; the glass prism. |
 | 7d | Backdrops | Parallax background layers and props per theme. |
 | 7e | Light and finish | Generated art for phantoms, beams and the exit; bloom on bright light; the HUD's glass tubes, hero lives and power-up bubbles, and the Exo 2 font; crystal lamp checkpoints, spark bursts and colour droplets with arrival ticks; parallax backdrops per theme. |
+| 7f | More themes | The Foundry (plated walls, grating panels, a furnace hall and girders) and the Glacier (ice walls, frost panels, an aurora and ice spires), for levels 10 to 15. |
+| 7g | Menus and logo | A generated emblem of white light split by a prism, the title in shimmering spectrum letters, menus and the pause overlay on glass panels with a glowing selection, and fainter touch buttons. |
+| 7h | Light on the walls | Light from the hero, beams, the open exit, checkpoint lamps and coloured motes falls on nearby walls, platforms and phantoms (up to eight lights at once): strongest on walls, faint on the backdrop. |
 | 8-1 | Screens and score | Title, game over and campaign-finished screens with menus that stop the clock; continuing after a game over; points from game events, shown in play; the best score this session. |
 | 8-2 | Music and audio | Four-stem music in Lydian that fills out as colours are restored; a settings screen for master, music and effects volumes, saved between runs. |
 | 8b | Web build | Build for the browser (`wasm32`) and publish it to GitHub Pages with each release, so the game can be played from the project's page. WebGL2 first, as every current browser has it, including Safari on iOS; WebGPU where it pays later. A clock that works in the browser, the canvas fitted to the page, audio started by the first tap or key, no Quit in a browser tab, `wasm-opt` for size, `just web` to build and serve it locally, and a release job that deploys to Pages and attaches the build. |
