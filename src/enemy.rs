@@ -456,28 +456,47 @@ fn update_lenses(
     }
 }
 
-/// Move orbs; solids and the prism stop them.
+/// Move orbs; solids and prisms stop them. A prism beyond the first breaks
+/// on stopping one.
 fn move_orbs(
     mut commands: Commands,
     time: Res<Time>,
     mut events: MessageWriter<GameEvent>,
+    mut abilities: ResMut<Abilities>,
     solids: Query<&Solid>,
-    prisms: Query<&Position, (With<Prism>, Without<Orb>)>,
+    prisms: Query<(Entity, &Position), (With<Prism>, Without<Orb>)>,
     mut orbs: Query<(Entity, &mut Orb, &mut Position, &mut PreviousPosition)>,
 ) {
     let dt = time.delta_secs();
-    let prism = prisms.single().ok().map(|p| p.0);
+    let mut prisms: Vec<(Entity, Vec2)> = prisms.iter().map(|(e, p)| (e, p.0)).collect();
     for (entity, mut orb, mut pos, mut prev) in &mut orbs {
         orb.age += dt;
         prev.0 = pos.0;
         pos.0 += orb.vel * dt;
-        let blocked_by_prism =
-            prism.is_some_and(|p| circles_overlap(pos.0, ORB_RADIUS, p, PRISM_RADIUS));
+        let blocker = prisms
+            .iter()
+            .position(|&(_, p)| circles_overlap(pos.0, ORB_RADIUS, p, PRISM_RADIUS));
+        let blocked_by_prism = blocker.is_some();
         let hit_solid = solids
             .iter()
             .any(|s| circle_hits_solid(pos.0, ORB_RADIUS, &s.0));
-        if blocked_by_prism {
+        if let Some(index) = blocker {
             events.write(GameEvent::OrbBlocked { at: pos.0 });
+            if abilities.prisms() > 1 {
+                let (prism, at) = prisms.swap_remove(index);
+                abilities.revoke(PowerUp::Prism);
+                commands.entity(prism).despawn();
+                commands.spawn((
+                    Name::new("Burst"),
+                    Burst {
+                        radius: PRISM_RADIUS * 2.0,
+                        age: 0.0,
+                        colour: None,
+                    },
+                    Position(at),
+                ));
+                events.write(GameEvent::PrismShattered { at });
+            }
         }
         if blocked_by_prism || hit_solid || orb.age > ORB_MAX_AGE {
             commands.entity(entity).despawn();
@@ -527,7 +546,7 @@ fn defeat_enemies(
                 events.write(GameEvent::ColourRestored { hue });
             }
         }
-        if let Some(power) = roll_drop(&mut rng, *abilities, &waiting, powerup_tuning.drop_chance) {
+        if let Some(power) = roll_drop(&mut rng, *abilities, &waiting, &powerup_tuning) {
             waiting.push(power);
             commands.spawn(pickup_bundle(power, pos.0));
             events.write(GameEvent::PickupDropped { power, at: pos.0 });
@@ -939,6 +958,46 @@ mod tests {
         ));
         app.update();
         assert_eq!(count::<Orb>(&mut app), 0);
+    }
+
+    #[test]
+    fn an_extra_prism_breaks_on_blocking_an_orb_but_the_last_never_does() {
+        let mut app = sim_app();
+        app.world_mut()
+            .resource_mut::<Abilities>()
+            .grant(PowerUp::Prism);
+        // Let the second prism join and glide into place.
+        for _ in 0..60 {
+            app.update();
+        }
+        assert_eq!(count::<Prism>(&mut app), 2);
+        let shoot_a_prism = |app: &mut App| {
+            let world = app.world_mut();
+            let prism = world
+                .query_filtered::<&Position, With<Prism>>()
+                .iter(world)
+                .next()
+                .unwrap()
+                .0;
+            let start = prism + Vec2::new(PRISM_RADIUS + ORB_RADIUS + 2.0, 0.0);
+            world.spawn((
+                Orb {
+                    vel: Vec2::new(-400.0, 0.0),
+                    age: 0.0,
+                },
+                Position(start),
+                PreviousPosition(start),
+            ));
+            app.update();
+            app.update();
+        };
+        shoot_a_prism(&mut app);
+        assert_eq!(count::<Orb>(&mut app), 0);
+        assert_eq!(count::<Prism>(&mut app), 1, "the extra one broke");
+        assert_eq!(app.world().resource::<Abilities>().prisms(), 1);
+        shoot_a_prism(&mut app);
+        assert_eq!(count::<Orb>(&mut app), 0);
+        assert_eq!(count::<Prism>(&mut app), 1, "the last one holds");
     }
 
     #[test]

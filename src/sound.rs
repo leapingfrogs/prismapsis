@@ -136,6 +136,7 @@ pub const fn power_up_degree(power: PowerUp) -> i32 {
         PowerUp::AntiGravity => 3,
         PowerUp::RapidFire => 4,
         PowerUp::AirSteering => 5,
+        PowerUp::Prism => 6,
     }
 }
 
@@ -287,6 +288,10 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
         }
         GameEvent::OrbFired { at } => vec![Cue::new(SoundId::OrbFire).at(at)],
         GameEvent::OrbBlocked { at } => vec![Cue::new(SoundId::OrbBlocked).at(at)],
+        // A prism breaking sounds like a small, high lens.
+        GameEvent::PrismShattered { at } => {
+            vec![Cue::new(SoundId::LensDefeat).at(at).speed(1.6).volume(0.8)]
+        }
         GameEvent::Bounced { at, spin } => {
             let speed = 1.0 + 0.06 * f32::from(spin.unsigned_abs());
             vec![Cue::new(SoundId::Bounce).at(at).speed(speed)]

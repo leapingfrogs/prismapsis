@@ -2,7 +2,7 @@
 //! for bounce parameters.
 //!
 //! F1 or backtick shows and hides the panel; R resets the hero; F2 turns
-//! bloom on and off; F3 grants or takes away air steering.
+//! bloom on and off; F3 adds a prism, back to one after the most.
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::ecs::system::SystemParam;
@@ -18,7 +18,7 @@ use crate::hero::{Carry, Hero, Position, PreviousPosition, Spin, Velocity};
 use crate::level::{Campaign, CurrentLevel, RespawnPoint};
 use crate::light::{LightTuning, Primary, Spectrum};
 use crate::physics::{BounceTuning, MAX_SPIN};
-use crate::powerup::{Abilities, PowerUp, PowerUpTuning};
+use crate::powerup::{Abilities, MAX_PRISMS, PowerUp, PowerUpTuning};
 use crate::prism::{PrismFrozen, PrismTuning};
 use crate::render::BloomOn;
 use crate::sound::{Auditions, SoundId, SoundSettings};
@@ -38,10 +38,7 @@ impl Plugin for DevToolsPlugin {
         app.add_plugins(EguiPlugin::default())
             .insert_resource(PanelVisible(true))
             .init_resource::<AuditionChoice>()
-            .add_systems(
-                Update,
-                (toggle_panel, reset_hero, toggle_bloom, toggle_air_steering),
-            )
+            .add_systems(Update, (toggle_panel, reset_hero, toggle_bloom, add_prism))
             .add_systems(EguiPrimaryContextPass, tuning_panel);
     }
 }
@@ -90,13 +87,15 @@ fn toggle_bloom(keys: Res<ButtonInput<KeyCode>>, mut bloom: ResMut<BloomOn>) {
     }
 }
 
-/// F3 grants or takes away air steering.
-fn toggle_air_steering(keys: Res<ButtonInput<KeyCode>>, mut abilities: ResMut<Abilities>) {
+/// F3 adds a prism, and goes back to one after the most.
+fn add_prism(keys: Res<ButtonInput<KeyCode>>, mut abilities: ResMut<Abilities>) {
     if keys.just_pressed(KeyCode::F3) {
-        if abilities.has(PowerUp::AirSteering) {
-            abilities.revoke(PowerUp::AirSteering);
+        if abilities.prisms() < MAX_PRISMS {
+            abilities.grant(PowerUp::Prism);
         } else {
-            abilities.grant(PowerUp::AirSteering);
+            while abilities.has(PowerUp::Prism) {
+                abilities.revoke(PowerUp::Prism);
+            }
         }
     }
 }
@@ -215,7 +214,7 @@ fn tuning_panel(
             ui.label("←/→ or A/D: spin   R: reset hero");
             ui.label("Space: fire   Shift: freeze prism   Q/E while frozen: nudge");
             ui.label("↑/↓ or W/S: hover (with anti-gravity)");
-            ui.label("F2: bloom   F3: air steering");
+            ui.label("F2: bloom   F3: add a prism");
         });
     Ok(())
 }
@@ -327,6 +326,7 @@ fn window_section(ui: &mut egui::Ui, mut window: Mut<Window>) {
 fn powerup_section(ui: &mut egui::Ui, tuning: &mut PowerUpTuning, abilities: &mut Abilities) {
     ui.add(egui::Slider::new(&mut tuning.drop_chance, 0.0..=1.0).text("drop chance"));
     ui.add(egui::Slider::new(&mut tuning.drop_lifetime, 2.0..=20.0).text("drop lifetime (s)"));
+    ui.add(egui::Slider::new(&mut tuning.prism_share, 0.0..=1.0).text("prism share of drops"));
     ui.add(egui::Slider::new(&mut tuning.rapid_fire_boost, 1.0..=3.0).text("rapid fire boost"));
     ui.add(egui::Slider::new(&mut tuning.spread_angle, 2.0..=45.0).text("spread angle (°)"));
     ui.horizontal_wrapped(|ui| {
