@@ -35,6 +35,20 @@ The builds aren't code-signed, so your system will warn you the first time:
   still refuses, allow it under System Settings, Privacy & Security.
 - **Linux:** unpack the archive and run `./prismapsis`.
 
+## Checking a download
+
+From 0.1.1, each release has a `SHA256SUMS` file, to check a download is
+intact with `sha256sum --check --ignore-missing SHA256SUMS`. GitHub's CI also
+signs a record of where each build came from, which the
+[GitHub CLI](https://cli.github.com/) can check:
+
+```
+gh attestation verify <file> --repo leapingfrogs/prismapsis
+```
+
+This shows a file was built from this repository. It doesn't stop the warnings
+above, which need paid code signing.
+
 ## Building from source
 
 The project uses [devenv](https://devenv.sh/) for its tools. Run `devenv
