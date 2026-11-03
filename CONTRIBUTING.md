@@ -70,3 +70,7 @@ Every CI run shows a coverage summary on its run page and uploads the full
 HTML report as the `coverage` artifact. To also publish the report from `main`
 to GitHub Pages, enable Pages with "GitHub Actions" as the source and set the
 repository variable `PUBLISH_COVERAGE` to `true`.
+
+Coverage makes the level generator and solver about 20 times slower, so their
+slowest tests are marked `#[cfg_attr(coverage, ignore = "...")]`. `cargo test`
+still runs them, in CI and in `just ci`.

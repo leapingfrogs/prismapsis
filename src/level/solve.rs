@@ -752,6 +752,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(coverage, ignore = "slow under coverage; `cargo test` runs it")]
     fn every_level_file_can_be_finished() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/levels");
         for path in level_files(&dir).unwrap() {

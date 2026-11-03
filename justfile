@@ -85,7 +85,8 @@ lint:
 test *args:
     cargo test --workspace --all-features --locked {{args}}
 
-# Run tests with coverage, failing below the threshold
+# Run tests with coverage, failing below the threshold. The slowest tests are
+# left out, as coverage makes them about 20 times slower; `just test` runs them
 coverage:
     cargo llvm-cov {{coverage_args}}
 
@@ -106,8 +107,9 @@ outdated:
 lint-commits:
     committed -vv --no-merge-commit origin/main..HEAD
 
-# Run every check CI runs (outdated is informational and excluded)
-ci: lint lint-commits coverage audit
+# Run every check CI runs (outdated is informational and excluded); `test`
+# adds the tests too slow to run under coverage
+ci: lint lint-commits coverage test audit
 
 # Remove build artifacts
 clean:

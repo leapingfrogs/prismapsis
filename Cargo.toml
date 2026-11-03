@@ -47,6 +47,8 @@ workspace = true
 unsafe_code = "forbid"
 missing_debug_implementations = "warn"
 unused_qualifications = "warn"
+# Set by cargo-llvm-cov, to leave out tests too slow under coverage.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
@@ -66,9 +68,13 @@ suboptimal_flops = "allow"
 # Optimise dependencies even in dev builds; Bevy is unusably slow otherwise.
 [profile.dev]
 opt-level = 1
+# Line numbers for panics and no more: full debug info made dev binaries
+# 1.9 GB, doubling rebuild times. Set `debug = true` to use a debugger.
+debug = "line-tables-only"
 
 [profile.dev.package."*"]
 opt-level = 3
+debug = false
 
 [profile.release]
 lto = "thin"
