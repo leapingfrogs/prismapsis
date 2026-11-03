@@ -1,3 +1,6 @@
+// No console window beside the game on Windows, except in dev builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::path::PathBuf;
 
 use bevy::prelude::*;

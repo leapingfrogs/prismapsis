@@ -34,6 +34,8 @@ pub mod settings;
 pub mod sound;
 pub mod spectrum_view;
 pub mod touch;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod window_icon;
 
 /// Title shown on the game window.
 pub const WINDOW_TITLE: &str = "Prismapsis";
@@ -84,6 +86,8 @@ impl Plugin for GamePlugin {
                 },
                 touch::TouchPlugin,
             ));
+        #[cfg(not(target_arch = "wasm32"))]
+        app.add_plugins(window_icon::WindowIconPlugin);
         #[cfg(feature = "dev")]
         app.add_plugins((dev_tools::DevToolsPlugin, level::reload::LevelReloadPlugin));
     }

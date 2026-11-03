@@ -64,7 +64,8 @@ web:
     rm -rf dist/web
     wasm-bindgen --target web --no-typescript --out-dir dist/web --out-name prismapsis target/wasm32-unknown-unknown/web/prismapsis.wasm
     wasm-opt -Oz {{wasm_features}} --strip-debug --strip-producers -o dist/web/prismapsis_bg.wasm dist/web/prismapsis_bg.wasm
-    cp web/index.html web/manifest.webmanifest dist/web/
+    cp web/index.html web/manifest.webmanifest assets/icon/tile_*.png assets/icon/rounded_32.png dist/web/
+    cp LICENSE-MIT LICENSE-APACHE assets/fonts/Exo2-OFL.txt dist/web/
 
 # Build the web version and serve it at http://localhost:8765 (or another
 # port)
