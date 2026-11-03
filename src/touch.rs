@@ -262,7 +262,12 @@ fn press_buttons(
             }
         }
     }
-    for touch in touches.iter() {
+    // A quick tap can start and end between frames, so it's never among
+    // the pressed touches; it still presses its button for one frame.
+    let tapped = touches
+        .iter_just_pressed()
+        .filter(|touch| touches.get_pressed(touch.id()).is_none());
+    for touch in touches.iter().chain(tapped) {
         if let Some((key, slid)) = sliding(touch) {
             want(key);
             if let Some(key) = slid {
@@ -907,6 +912,38 @@ mod tests {
         };
         tap(&mut app, 1);
         assert!(paused(&app));
+        tap(&mut app, 2);
+        assert!(!paused(&app));
+    }
+
+    #[test]
+    fn a_tap_within_one_frame_still_pauses() {
+        let mut app = app();
+        app.add_plugins(crate::pause::PausePlugin);
+        spawn_button(
+            &mut app,
+            TouchButton::new(KeyCode::KeyP),
+            Vec2::new(900.0, 100.0),
+        );
+        app.update();
+        let paused = |app: &App| app.world().resource::<Time<Virtual>>().is_paused();
+        // A quick tap: the finger is down and up again before the next frame.
+        let tap = |app: &mut App, id| {
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                app.world_mut().write_message(TouchInput {
+                    phase,
+                    position: Vec2::new(900.0, 100.0),
+                    window: Entity::PLACEHOLDER,
+                    force: None,
+                    id,
+                });
+            }
+            app.update();
+            app.update();
+        };
+        tap(&mut app, 1);
+        assert!(paused(&app));
+        assert!(!keys(&app).pressed(KeyCode::KeyP), "the tap lets go");
         tap(&mut app, 2);
         assert!(!paused(&app));
     }
