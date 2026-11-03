@@ -195,18 +195,11 @@ Pickups are a coloured ring around a white glyph. They pulse gently and
 blink faster during their last 2 s. Collected abilities show as coloured
 bars under the life pips.
 
-### Beam energy as a power-up lever
+### Beam energy and power-ups
 
-Beam energy gives power-ups a cost dimension as well as a benefit:
-
-- **Capacity and recharge upgrades**, such as a larger energy bar for
-  longer shots, faster recharge, or a shorter recharge delay.
-- **Energy-hungry abilities**, where stronger weapons cost more to use.
-  For example, rear shot or piercing could raise the drain rate while
-  active, so collecting more power trades against how long you can fire.
-- **Decided in iteration 4:** collected abilities are always on and cost no
-  extra energy. Balance comes from drop rates for now; energy costs can be
-  added later if stacked weapons feel too strong.
+Collected abilities are always on and cost no extra energy, and no power-up
+changes the energy bar or its recharge. Balance comes from drop rates for
+now; energy costs can be added later if stacked weapons feel too strong.
 
 ## Levels
 
@@ -722,7 +715,7 @@ output is committed; the game only ever loads level files.
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
-| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; light nova, a recharging burst that clears nearby enemies; beam energy upgrades. (Mirror face, reflecting shots back, was dropped: the ring of prisms covers shielding.) |
+| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; light nova, a recharging burst that clears nearby enemies. (Mirror face, reflecting shots back, was dropped: the ring of prisms covers shielding. Beam energy upgrades were dropped too: rapid fire, spread and the nova cover firepower.) |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |
