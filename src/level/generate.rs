@@ -167,6 +167,7 @@ const fn power_name(power: PowerUp) -> &'static str {
         PowerUp::Piercing => "piercing",
         PowerUp::AirSteering => "air-steering",
         PowerUp::Prism => "prism",
+        PowerUp::LightNova => "light-nova",
     }
 }
 

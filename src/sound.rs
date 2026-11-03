@@ -137,6 +137,7 @@ pub const fn power_up_degree(power: PowerUp) -> i32 {
         PowerUp::RapidFire => 4,
         PowerUp::AirSteering => 5,
         PowerUp::Prism => 6,
+        PowerUp::LightNova => 7,
     }
 }
 
@@ -291,6 +292,18 @@ pub fn cues_for(event: GameEvent, combo: &mut KillCombo) -> Vec<Cue> {
         // A prism breaking sounds like a small, high lens.
         GameEvent::PrismShattered { at } => {
             vec![Cue::new(SoundId::LensDefeat).at(at).speed(1.6).volume(0.8)]
+        }
+        // The nova: a deep burst under a bright chord.
+        GameEvent::NovaFired { at } => vec![
+            Cue::new(SoundId::LensDefeat).at(at).speed(0.5),
+            Cue::new(SoundId::ColourRestored)
+                .at(at)
+                .speed(1.5)
+                .volume(0.8),
+        ],
+        // Ready again: the energy-full chime, higher.
+        GameEvent::NovaReady { at } => {
+            vec![Cue::new(SoundId::EnergyFull).at(at).speed(1.5)]
         }
         GameEvent::Bounced { at, spin } => {
             let speed = 1.0 + 0.06 * f32::from(spin.unsigned_abs());

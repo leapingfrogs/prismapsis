@@ -57,7 +57,7 @@ pub enum Figure {
 
 impl Figure {
     /// Every figure, in sheet order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::HeroSurface,
         Self::HeroShade,
         Self::Prism,
@@ -69,6 +69,7 @@ impl Figure {
         Self::Glyph(PowerUp::Piercing),
         Self::Glyph(PowerUp::AirSteering),
         Self::Glyph(PowerUp::Prism),
+        Self::Glyph(PowerUp::LightNova),
         Self::Mote,
         Self::Lens,
         Self::Orb,
@@ -404,6 +405,15 @@ pub fn glyph_parts(power: PowerUp) -> Vec<(GlyphPart, Vec2, f32)> {
                 PI,
             ),
         ],
+        // A ring with rays all round: a burst of light.
+        PowerUp::LightNova => std::iter::once((GlyphPart::Ring(s * 0.4), Vec2::ZERO, 0.0))
+            .chain((0..8u8).map(|k| {
+                let angle = f32::from(k) * PI / 4.0;
+                let length = if k % 2 == 0 { s * 0.5 } else { s * 0.3 };
+                let offset = Vec2::from_angle(angle) * (s * 0.62 + length / 2.0);
+                (GlyphPart::Bar(length, STROKE), offset, angle)
+            }))
+            .collect(),
         // A prism's outline: a triangle point up.
         PowerUp::Prism => {
             let r = s * 0.95;

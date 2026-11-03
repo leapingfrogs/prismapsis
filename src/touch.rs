@@ -58,8 +58,8 @@ struct Grip {
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TouchButton {
     pub key: KeyCode,
-    /// Only shown while the hero has anti-gravity.
-    pub hover: bool,
+    /// Only shown while the hero has this power-up.
+    pub needs: Option<PowerUp>,
     /// Keys held by sliding a finger up or down from the button. A finger
     /// that starts on such a button keeps it held wherever it goes.
     pub slide: Option<[KeyCode; 2]>,
@@ -70,15 +70,15 @@ impl TouchButton {
     pub const fn new(key: KeyCode) -> Self {
         Self {
             key,
-            hover: false,
+            needs: None,
             slide: None,
         }
     }
 
     #[must_use]
-    pub const fn hovering(self) -> Self {
+    pub const fn needing(self, power: PowerUp) -> Self {
         Self {
-            hover: true,
+            needs: Some(power),
             ..self
         }
     }
@@ -405,7 +405,8 @@ fn group(direction: FlexDirection) -> Node {
 }
 
 /// Spin on the left with hovering above it; fire on the right with hold
-/// above it in reach of the same thumb, sliding hold up turning the prism
+/// above it in reach of the same thumb, and the nova above hold while the
+/// hero has it, sliding hold up turning the prism
 /// anticlockwise and down clockwise, as Q and E do; pause at the top
 /// right, under the score.
 fn spawn_controls(mut commands: Commands, art: Option<Res<HudArt>>) {
@@ -451,14 +452,14 @@ fn spawn_controls(mut commands: Commands, art: Option<Res<HudArt>>) {
                         group(FlexDirection::Column),
                         children![
                             button(
-                                TouchButton::new(KeyCode::ArrowUp).hovering(),
+                                TouchButton::new(KeyCode::ArrowUp).needing(PowerUp::AntiGravity),
                                 "Up",
                                 art,
                                 Glyph::Up,
                                 15.0
                             ),
                             button(
-                                TouchButton::new(KeyCode::ArrowDown).hovering(),
+                                TouchButton::new(KeyCode::ArrowDown).needing(PowerUp::AntiGravity),
                                 "Down",
                                 art,
                                 Glyph::Down,
@@ -485,35 +486,46 @@ fn spawn_controls(mut commands: Commands, art: Option<Res<HudArt>>) {
                             ),
                         ],
                     ),
-                    (
-                        group(FlexDirection::Column),
-                        children![
-                            (
-                                square(
-                                    TouchButton::new(KeyCode::ShiftLeft)
-                                        .sliding(KeyCode::KeyQ, KeyCode::KeyE),
-                                    "Hold",
-                                    15.0,
-                                ),
-                                children![(button_glyph(art, Glyph::Unlocked, 15.0), HoldGlyph)],
-                            ),
-                            button(
-                                TouchButton::new(KeyCode::Space),
-                                "Fire",
-                                art,
-                                Glyph::Fire,
-                                24.0
-                            ),
-                        ],
-                    ),
+                    fire_column(art),
                 ],
             ),
         ],
     ));
 }
 
-/// Show the buttons in play once touched, the hover buttons only with
-/// anti-gravity, pressed or locked buttons brighter, and hold's lock
+/// The right thumb's buttons: the nova (while held), hold, and fire.
+fn fire_column(art: &HudArt) -> impl Bundle {
+    (
+        group(FlexDirection::Column),
+        children![
+            button(
+                TouchButton::new(KeyCode::KeyN).needing(PowerUp::LightNova),
+                "Nova",
+                art,
+                Glyph::Nova,
+                13.0
+            ),
+            (
+                square(
+                    TouchButton::new(KeyCode::ShiftLeft).sliding(KeyCode::KeyQ, KeyCode::KeyE),
+                    "Hold",
+                    15.0,
+                ),
+                children![(button_glyph(art, Glyph::Unlocked, 15.0), HoldGlyph)],
+            ),
+            button(
+                TouchButton::new(KeyCode::Space),
+                "Fire",
+                art,
+                Glyph::Fire,
+                24.0
+            ),
+        ],
+    )
+}
+
+/// Show the buttons in play once touched, those for a power-up (hovering,
+/// the nova) only while the hero has it, pressed or locked buttons brighter, and hold's lock
 /// closed while it's locked.
 fn update_controls(
     controls: Res<TouchControls>,
@@ -544,12 +556,14 @@ fn update_controls(
             Visibility::Hidden
         });
     }
-    let hovering = abilities.is_some_and(|a| a.has(PowerUp::AntiGravity));
     for (button, mut visibility, mut colour) in &mut buttons {
-        visibility.set_if_neq(if button.hover && !hovering {
-            Visibility::Hidden
-        } else {
+        let held = button
+            .needs
+            .is_none_or(|power| abilities.as_ref().is_some_and(|a| a.has(power)));
+        visibility.set_if_neq(if held {
             Visibility::Inherited
+        } else {
+            Visibility::Hidden
         });
         let wanted = if controls.held.contains(&button.key) {
             PRESSED_COLOUR
@@ -807,7 +821,7 @@ mod tests {
     fn hidden_buttons_ignore_touches() {
         let mut app = app();
         app.world_mut().spawn((
-            TouchButton::new(KeyCode::ArrowUp).hovering(),
+            TouchButton::new(KeyCode::ArrowUp).needing(PowerUp::AntiGravity),
             ComputedNode {
                 size: Vec2::splat(100.0),
                 ..default()

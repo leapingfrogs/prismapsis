@@ -160,7 +160,8 @@ starting points to be adjusted in play.
 - Each drop **shows which power-up it holds**, so players can decide
   whether it is worth the detour.
 - Drops come **in a fixed order, movement control first, then firepower**:
-  air steering, rapid fire, anti-gravity, spread, piercing, rear shot.
+  air steering, rapid fire, anti-gravity, spread, piercing, rear shot,
+  light nova.
   Each drop holds the first of these the hero has neither collected nor
   got waiting in the level, so a drop is **never one the hero has**, and a
   fresh life rebuilds from the gentlest help up. A pickup left to expire
@@ -182,7 +183,7 @@ starting points to be adjusted in play.
 | Piercing | Line through a ring (blue) | Beams pass through enemies, hitting everything up to the next wall or the prism. |
 | Rear shot | Double arrow (orange) | A second beam fires backwards. |
 | Extra prism | Triangle (silver) | Another prism joins the ring, up to five; one breaks on blocking an enemy shot, never the last. F3 adds one in dev builds, back to one after five. |
-| Light nova | *Later* | A burst that clears nearby enemies, usable again after a recharge (e.g. 30 s). Needs its own button. |
+| Light nova | Ring with rays (teal) | **N** (gamepad **North**), or its touch button, sets off a ring of light that spreads 350 units from the hero in 0.3 s and lights the walls as it goes. Motes and orbs it reaches are destroyed and lenses lose half their health; enemies it defeats release their light as usual. It then recharges for 25 s, its HUD bubble faint meanwhile, and chimes when ready. F4 grants it in dev builds. |
 
 Weapon power-ups are **separate pickups that stack**: rear shot, spread,
 rapid fire and piercing all apply together once collected. With rear shot
@@ -194,18 +195,11 @@ Pickups are a coloured ring around a white glyph. They pulse gently and
 blink faster during their last 2 s. Collected abilities show as coloured
 bars under the life pips.
 
-### Beam energy as a power-up lever
+### Beam energy and power-ups
 
-Beam energy gives power-ups a cost dimension as well as a benefit:
-
-- **Capacity and recharge upgrades**, such as a larger energy bar for
-  longer shots, faster recharge, or a shorter recharge delay.
-- **Energy-hungry abilities**, where stronger weapons cost more to use.
-  For example, rear shot or piercing could raise the drain rate while
-  active, so collecting more power trades against how long you can fire.
-- **Decided in iteration 4:** collected abilities are always on and cost no
-  extra energy. Balance comes from drop rates for now; energy costs can be
-  added later if stacked weapons feel too strong.
+Collected abilities are always on and cost no extra energy, and no power-up
+changes the energy bar or its recharge. Balance comes from drop rates for
+now; energy costs can be added later if stacked weapons feel too strong.
 
 ## Levels
 
@@ -476,8 +470,8 @@ output is committed; the game only ever loads level files.
 - **Buttons,** drawn with Bevy UI over the level in play: spin left and
   right at the bottom left, with hover up and down above them only while
   the hero has anti-gravity; fire at the bottom right with hold the prism
-  above it, in reach of the same thumb; pause at the top right under the
-  score. Each button holds its key while any finger is on it, so one
+  above it, in reach of the same thumb, and the light nova above hold
+  only while the hero has it; pause at the top right under the score. Each button holds its key while any finger is on it, so one
   thumb can hold fire while the other taps spin, and a finger sliding
   onto a button presses it.
 - **Hold** holds the prism while pressed, and a tap locks it held, so
@@ -721,7 +715,7 @@ output is committed; the game only ever loads level files.
 | 3a | Laser beam | Hold-to-fire beam with an energy bar, ray-cast to the first wall in the travel direction, splitting into RGB beams through the prism; target dummies to test against. |
 | 3b | Enemies | Motes (timed waves from the edges) and Lenses (placed turrets firing slow orbs); contact and shots cost lives; the prism blocks shots; lives and respawn. |
 | 4 | Power-ups | Timed drops at the enemy's death spot, gap-filling drop choice, abilities kept until death: anti-gravity, rear shot, spread, rapid fire, piercing. |
-| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; light nova; beam energy upgrades. (Mirror face, reflecting shots back, was dropped: the ring of prisms covers shielding.) |
+| 4b | More power-ups | Air steering; drops in a fixed order, never one the hero has; extra prisms in an evenly spaced ring, breaking on blocking shots; light nova, a recharging burst that clears nearby enemies. (Mirror face, reflecting shots back, was dropped: the ring of prisms covers shielding. Beam energy upgrades were dropped too: rapid fire, spread and the nova cover firepower.) |
 | 4c | Sound effects | Game events from the simulation; `tools/sfx` generator; first-pass effects with Lydian colour notes, beam hum, stereo panning and dev panel volumes. |
 | 5 | Light and colour | Coloured enemies feeding red, green and blue gauges; restored primaries and secondaries; phantom platforms; hidden things; greyscale-to-colour wash; exit gate opened by white; gauges HUD and sounds; test room with all of these. |
 | 6a | Level format | TOML and ASCII format, default legend, rectangle merging; walls, phantoms, pickups, lenses, start, exit and checkpoints; waves and light settings; hot reload; validation and coloured viewer commands; test room converted to a level file; camera on both axes; exit loads the next level. |

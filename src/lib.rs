@@ -20,6 +20,8 @@ pub mod hud;
 pub mod level;
 pub mod light;
 pub mod music;
+pub mod nova;
+pub mod nova_view;
 pub mod pause;
 pub mod physics;
 pub mod platforms;
@@ -116,6 +118,7 @@ impl Plugin for SimulationPlugin {
                 powerup::PowerUpPlugin,
                 light::LightPlugin,
                 platforms::PlatformsPlugin,
+                nova::NovaPlugin,
             ));
     }
 }
