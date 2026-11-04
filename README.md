@@ -22,6 +22,7 @@ Downloads for Linux, Windows and macOS are on the
 | Move up and down, with anti-gravity | W / S or arrow keys | D-pad up and down |
 | Light nova, once collected | N | North |
 | Pause | P | Start |
+| Menu, with settings | Esc | Select |
 | Fullscreen or a window | F11 | |
 
 Phones and tablets get on-screen buttons.

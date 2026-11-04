@@ -80,7 +80,7 @@ pub const fn stem_level(stem: Stem, screen: Option<Screen>, restored: [bool; 3])
     let on = match (screen, stem.primary()) {
         (_, None) | (Some(Screen::Title | Screen::Settings | Screen::Finished), _) => true,
         (Some(Screen::GameOver), Some(_)) => false,
-        (Some(Screen::Playing) | None, Some(primary)) => restored[primary.index()],
+        (Some(Screen::Playing | Screen::Paused) | None, Some(primary)) => restored[primary.index()],
     };
     if on { 1.0 } else { 0.0 }
 }
@@ -124,7 +124,8 @@ fn drive_music(
 ) {
     let screen = screen.map(|s| *s.get());
     let restored = spectrum.map_or([false; 3], |s| s.restored);
-    let paused = virtual_time.is_paused() && matches!(screen, None | Some(Screen::Playing));
+    let paused =
+        virtual_time.is_paused() && matches!(screen, None | Some(Screen::Playing | Screen::Paused));
     let volume = settings.music * settings.master * if paused { PAUSED_LEVEL } else { 1.0 };
     for (stem, mut sink) in &mut stems {
         let target = stem_level(stem.0, screen, restored) * volume;
@@ -151,6 +152,17 @@ mod tests {
             assert!(stem_level(Stem::Red, screen, none).abs() < f32::EPSILON);
             assert!((stem_level(Stem::Red, screen, red_only) - 1.0).abs() < f32::EPSILON);
             assert!(stem_level(Stem::Blue, screen, red_only).abs() < f32::EPSILON);
+        }
+    }
+
+    #[test]
+    fn the_menu_from_play_keeps_the_music_of_the_level() {
+        for stem in Stem::ALL {
+            for restored in [[false; 3], [true; 3]] {
+                let playing = stem_level(stem, Some(Screen::Playing), restored);
+                let menu = stem_level(stem, Some(Screen::Paused), restored);
+                assert!((menu - playing).abs() < f32::EPSILON, "{stem:?}");
+            }
         }
     }
 

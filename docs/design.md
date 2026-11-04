@@ -409,6 +409,10 @@ output is committed; the game only ever loads level files.
   changes nothing on resume.
 - Level files still reload while paused, so a level can be edited without
   the hero moving.
+- **Esc** (gamepad **Select**) opens a menu over the waiting game: resume,
+  settings, or back to the title, which ends the game. Esc steps back out
+  at once, and the settings return to the screen they came from. Phones and
+  tablets have only the pause button so far.
 
 ## Screens and score
 

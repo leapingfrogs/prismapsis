@@ -1,5 +1,5 @@
-//! The game's screens: the title, its settings, play, game over and the
-//! campaign's end.
+//! The game's screens: the title, the settings, play, the menu from play,
+//! game over and the campaign's end.
 //!
 //! Menu screens show over the level with the game clock stopped, as pausing
 //! does, so the level waits greyed out behind them. Choosing to play from
@@ -28,8 +28,10 @@ pub enum Screen {
     GameOver,
     /// The campaign's last level is finished.
     Finished,
-    /// The volumes, from the title.
+    /// The volumes, from the title or the menu from play.
     Settings,
+    /// The menu from play, opened with Esc, with the game waiting behind it.
+    Paused,
 }
 
 /// Run condition: true while playing, and always when the game has no
@@ -44,6 +46,8 @@ pub fn in_play(screen: Option<Res<State<Screen>>>) -> bool {
 pub enum Choice {
     /// Start a new game.
     Play,
+    /// Back to the game from the menu.
+    Resume,
     /// Play the level again after a game over, scoring from nothing.
     Continue,
     /// Go back to the title, starting a new game.
@@ -51,7 +55,7 @@ pub enum Choice {
     Settings,
     /// A volume, changed with left and right.
     Volume(Channel),
-    /// Back to the title from the settings.
+    /// Out of the settings, to the screen they were opened from.
     Back,
     Quit,
 }
@@ -89,6 +93,7 @@ impl Choice {
     fn label(self, settings: Option<&SoundSettings>) -> String {
         match self {
             Self::Play => "Play".to_owned(),
+            Self::Resume => "Resume".to_owned(),
             Self::Continue => "Continue".to_owned(),
             Self::Title => "Back to the title".to_owned(),
             Self::Settings => "Settings".to_owned(),
@@ -106,6 +111,16 @@ impl Choice {
 /// Set on going back to the title from a game, so it starts a new one.
 #[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NewGame(pub bool);
+
+/// The screen the settings were opened from, to go back to.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SettingsFrom(pub Screen);
+
+impl Default for SettingsFrom {
+    fn default() -> Self {
+        Self(Screen::Title)
+    }
+}
 
 /// A screen's menu: its choices and which is selected.
 #[derive(Component, Debug, Clone, PartialEq)]
@@ -151,12 +166,14 @@ impl Plugin for ScreensPlugin {
     fn build(&self, app: &mut App) {
         app.insert_state(self.start)
             .init_resource::<NewGame>()
+            .init_resource::<SettingsFrom>()
             .add_systems(
                 OnEnter(Screen::Title),
                 (new_game.run_if(|new: Res<NewGame>| new.0), spawn_title).chain(),
             )
             .add_systems(OnEnter(Screen::Settings), spawn_settings)
             .add_systems(OnEnter(Screen::Playing), resume)
+            .add_systems(OnEnter(Screen::Paused), (freeze, spawn_paused))
             .add_systems(OnEnter(Screen::GameOver), (freeze, spawn_game_over))
             .add_systems(OnEnter(Screen::Finished), (freeze, spawn_finished))
             // A new game runs one step to reset the room, then stops.
@@ -166,6 +183,7 @@ impl Plugin for ScreensPlugin {
                 (
                     watch_play.run_if(in_state(Screen::Playing)),
                     (choose, highlight).chain().run_if(not(in_play)),
+                    escape,
                 ),
             );
     }
@@ -376,7 +394,7 @@ fn spawn_title(mut commands: Commands, art: MenuArt, score: Res<Score>, time: Re
         "Prismapsis",
         &lines,
         title_choices(),
-        "Left and right spin, space fires\nShift holds the prism, P pauses",
+        "Left and right spin, space fires\nShift holds the prism, P pauses, Esc for the menu",
         time.elapsed_secs_f64(),
     );
 }
@@ -395,6 +413,19 @@ fn spawn_settings(mut commands: Commands, art: MenuArt, time: Res<Time<Real>>) {
             Choice::Back,
         ],
         "Left and right change a volume, as do taps on either side",
+        time.elapsed_secs_f64(),
+    );
+}
+
+fn spawn_paused(mut commands: Commands, art: MenuArt, time: Res<Time<Real>>) {
+    spawn_screen(
+        &mut commands,
+        &art.looks(),
+        Screen::Paused,
+        "Paused",
+        &[],
+        vec![Choice::Resume, Choice::Settings, Choice::Title],
+        "Going back to the title ends this game",
         time.elapsed_secs_f64(),
     );
 }
@@ -442,6 +473,31 @@ fn spawn_finished(mut commands: Commands, art: MenuArt, score: Res<Score>, time:
     );
 }
 
+/// Esc or the gamepad's select button opens the menu from play and steps back
+/// out of it. Unlike choosing, this takes effect at once: it can't lose
+/// anything, so it has no need of a menu's delay.
+fn escape(
+    keys: Res<ButtonInput<KeyCode>>,
+    gamepads: Query<&Gamepad>,
+    screen: Res<State<Screen>>,
+    from: Res<SettingsFrom>,
+    mut next: ResMut<NextState<Screen>>,
+) {
+    let pressed = keys.just_pressed(KeyCode::Escape)
+        || gamepads
+            .iter()
+            .any(|pad| pad.just_pressed(GamepadButton::Select));
+    if !pressed {
+        return;
+    }
+    match screen.get() {
+        Screen::Playing => next.set(Screen::Paused),
+        Screen::Paused => next.set(Screen::Playing),
+        Screen::Settings => next.set(from.0),
+        Screen::Title | Screen::GameOver | Screen::Finished => {}
+    }
+}
+
 /// Up and down move through the menu; left and right change a volume,
 /// playing a sound to hear it by; enter, space or the gamepad's south or
 /// start button chooses.
@@ -452,7 +508,11 @@ fn choose(
     mut menus: Query<&mut Menu>,
     (mut score, mut new): (ResMut<Score>, ResMut<NewGame>),
     (mut settings, mut auditions): (Option<ResMut<SoundSettings>>, Option<ResMut<Auditions>>),
-    mut next: ResMut<NextState<Screen>>,
+    (mut next, mut from, screen): (
+        ResMut<NextState<Screen>>,
+        ResMut<SettingsFrom>,
+        Res<State<Screen>>,
+    ),
     mut exit: MessageWriter<AppExit>,
 ) {
     let Ok(mut menu) = menus.single_mut() else {
@@ -497,7 +557,7 @@ fn choose(
         return;
     }
     match menu.choices[menu.selected] {
-        Choice::Play => next.set(Screen::Playing),
+        Choice::Play | Choice::Resume => next.set(Screen::Playing),
         Choice::Continue => {
             score.restart();
             next.set(Screen::Playing);
@@ -506,8 +566,11 @@ fn choose(
             new.0 = true;
             next.set(Screen::Title);
         }
-        Choice::Settings => next.set(Screen::Settings),
-        Choice::Back => next.set(Screen::Title),
+        Choice::Settings => {
+            from.0 = *screen.get();
+            next.set(Screen::Settings);
+        }
+        Choice::Back => next.set(from.0),
         Choice::Volume(_) => {}
         Choice::Quit => {
             exit.write(AppExit::Success);
@@ -740,6 +803,121 @@ mod tests {
         tap(&mut app, KeyCode::Enter);
         assert_eq!(screen(&app), Screen::Title);
         assert!(!app.world().resource::<NewGame>().0, "no new game");
+    }
+
+    #[test]
+    fn esc_opens_a_menu_over_the_waiting_game_and_closes_it_at_once() {
+        let mut app = app(Screen::Playing);
+        run(&mut app, 20);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Paused);
+        assert!(paused(&app));
+        assert_eq!(lines(&mut app), ["Resume", "Settings", "Back to the title"]);
+        let still = hero(&mut app);
+        run(&mut app, 20);
+        assert_eq!(hero(&mut app), still);
+
+        // Before the menu takes other input.
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Playing);
+        assert!(!paused(&app));
+        assert_eq!(menu(&mut app), None);
+        run(&mut app, 20);
+        assert_ne!(hero(&mut app), still);
+    }
+
+    #[test]
+    fn resume_carries_on_the_same_game() {
+        let mut app = app(Screen::Playing);
+        run(&mut app, 5);
+        score(&mut app, 700);
+        tap(&mut app, KeyCode::Escape);
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Playing);
+        assert!(!paused(&app));
+        assert_eq!(app.world().resource::<Score>().points, 700);
+    }
+
+    #[test]
+    fn settings_from_the_menu_go_back_to_it_and_on_to_the_same_game() {
+        let mut app = app(Screen::Playing);
+        app.init_resource::<SoundSettings>();
+        run(&mut app, 5);
+        score(&mut app, 700);
+        tap(&mut app, KeyCode::Escape);
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Settings);
+        assert!(paused(&app));
+
+        // Back with its line, then with Esc.
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowUp);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Paused);
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Settings);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Paused);
+        assert!(paused(&app));
+
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Playing);
+        assert_eq!(app.world().resource::<Score>().points, 700);
+    }
+
+    #[test]
+    fn going_to_the_title_from_the_menu_starts_a_new_game() {
+        let mut app = app(Screen::Playing);
+        run(&mut app, 5);
+        score(&mut app, 700);
+        tap(&mut app, KeyCode::Escape);
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowUp);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Title);
+        run(&mut app, 5);
+        assert_eq!(app.world().resource::<Score>().points, 0);
+    }
+
+    #[test]
+    fn esc_goes_back_from_the_settings_to_the_title_and_does_nothing_there() {
+        let mut app = app(Screen::Title);
+        app.init_resource::<SoundSettings>();
+        wait_for_menu(&mut app);
+        tap(&mut app, KeyCode::ArrowDown);
+        tap(&mut app, KeyCode::Enter);
+        assert_eq!(screen(&app), Screen::Settings);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Title);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Title);
+    }
+
+    #[test]
+    fn esc_does_nothing_on_game_over() {
+        let mut app = app(Screen::Playing);
+        run(&mut app, 5);
+        send(&mut app, GameEvent::OutOfLives);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::GameOver);
+    }
+
+    #[test]
+    fn esc_opens_the_menu_from_a_p_pause_and_resuming_starts_the_clock() {
+        let mut app = app(Screen::Playing);
+        run(&mut app, 5);
+        tap(&mut app, KeyCode::KeyP);
+        assert!(paused(&app));
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Paused);
+        tap(&mut app, KeyCode::Escape);
+        assert_eq!(screen(&app), Screen::Playing);
+        assert!(!paused(&app));
     }
 
     #[test]
