@@ -55,7 +55,7 @@ pub struct PauseOverlay;
 pub struct PauseHint;
 
 /// The hint while keys are in use.
-pub const KEY_HINT: &str = "P to resume";
+pub const KEY_HINT: &str = "P to resume, Esc for the menu";
 
 /// "Paused" on a glass panel in the middle of the view, with a hint below.
 pub fn spawn_overlay(mut commands: Commands, art: Option<Res<HudArt>>) {
