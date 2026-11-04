@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/leapingfrogs/prismapsis/compare/v0.1.0...v0.1.1) (2026-11-04)
+
+
+### Features
+
+* add an Esc menu with settings to play ([#51](https://github.com/leapingfrogs/prismapsis/issues/51)) ([87a44b5](https://github.com/leapingfrogs/prismapsis/commit/87a44b58ffaec57678fd238d94e6937eb522713d))
+* start release builds fullscreen ([#50](https://github.com/leapingfrogs/prismapsis/issues/50)) ([411ce0e](https://github.com/leapingfrogs/prismapsis/commit/411ce0eee2fa4c1c6ca623bc7aa9c9f29cd81581))
+
 ## 0.1.0 (2026-11-03)
 
 
