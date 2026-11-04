@@ -144,9 +144,11 @@ fn time_seed() -> u64 {
         })
 }
 
-/// Configuration for the primary window. With `fullscreen`, the game starts
-/// borderless at the monitor's native resolution; otherwise it opens a
-/// `WINDOW_SIZE` window.
+/// Configuration for the primary window.
+///
+/// With `fullscreen`, the game starts borderless at the native resolution of
+/// the primary monitor, or where the compositor puts it if there's no such
+/// thing, as on Wayland; otherwise it opens a `WINDOW_SIZE` window.
 ///
 /// In a browser it draws into the page's `#game`
 /// canvas, filling its container, and keeps keys like space from
@@ -157,7 +159,8 @@ pub fn primary_window(fullscreen: bool) -> Window {
         title: WINDOW_TITLE.to_owned(),
         resolution: WindowResolution::new(WINDOW_SIZE.0, WINDOW_SIZE.1),
         mode: if fullscreen {
-            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            // No window exists yet to be on a current monitor.
+            WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
         } else {
             WindowMode::Windowed
         },
@@ -191,7 +194,7 @@ mod tests {
     fn primary_window_can_start_fullscreen() {
         assert_eq!(
             primary_window(true).mode,
-            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+            WindowMode::BorderlessFullscreen(MonitorSelection::Primary)
         );
     }
 

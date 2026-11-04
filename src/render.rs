@@ -4,7 +4,7 @@
 use bevy::camera::{Hdr, ScalingMode};
 use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
 use bevy::prelude::*;
-use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode};
+use bevy::window::{CursorMoved, CursorOptions, MonitorSelection, PrimaryWindow, WindowMode};
 
 use crate::art::figures::{Animation, Sheet, stagger};
 use crate::art::sprites::{BURST_FRAMES, BURST_REACH, CELL_SIZE, Figure, POST_REACH, PX_PER_UNIT};
@@ -24,6 +24,7 @@ use crate::physics::{BounceTuning, Traits};
 use crate::powerup::{Abilities, Pickup, PowerUp, PowerUpTuning, pickup_shown};
 use crate::prism::{Prism, PrismFrozen};
 use crate::screens::{Screen, in_play};
+use crate::settings::FullscreenChoice;
 use std::f32::consts::FRAC_PI_2;
 
 /// Vertical extent of the view in world units, regardless of window size.
@@ -39,9 +40,11 @@ pub struct PresentationPlugin;
 
 impl Plugin for PresentationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<BeamView>()
+        app.add_message::<CursorMoved>()
+            .init_resource::<BeamView>()
             .init_resource::<BeamPieces>()
             .add_systems(Update, gather_lights.after(draw_beam))
+            .add_systems(Update, hide_idle_cursor)
             .init_resource::<BloomOn>()
             .add_systems(
                 Startup,
@@ -1056,16 +1059,45 @@ fn update_life_pips(lives: Res<Lives>, mut pips: Query<(&LifePip, &mut Node)>) {
 }
 
 /// F11 switches between a window and borderless fullscreen at the monitor's
-/// native resolution.
+/// native resolution, and the next run opens the same way.
 fn toggle_fullscreen(
     keys: Res<ButtonInput<KeyCode>>,
     mut windows: Query<&mut Window, With<PrimaryWindow>>,
+    choice: Option<ResMut<FullscreenChoice>>,
 ) {
     if !keys.just_pressed(KeyCode::F11) {
         return;
     }
-    for mut window in &mut windows {
-        window.mode = toggled_mode(window.mode);
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    window.mode = toggled_mode(window.mode);
+    if let Some(mut choice) = choice {
+        choice.0 = Some(window.mode != WindowMode::Windowed);
+    }
+}
+
+/// Seconds the mouse sits still before fullscreen hides its cursor.
+const CURSOR_IDLE_SECS: f32 = 2.0;
+
+/// Fullscreen play doesn't use the mouse, so its cursor goes once it's still,
+/// and comes back when moved for the dev panel.
+fn hide_idle_cursor(
+    mut moved: MessageReader<CursorMoved>,
+    time: Res<Time<Real>>,
+    mut idle: Local<f32>,
+    mut windows: Query<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
+) {
+    *idle = if moved.read().count() > 0 {
+        0.0
+    } else {
+        *idle + time.delta_secs()
+    };
+    for (window, mut cursor) in &mut windows {
+        let visible = window.mode == WindowMode::Windowed || *idle < CURSOR_IDLE_SECS;
+        if cursor.visible != visible {
+            cursor.visible = visible;
+        }
     }
 }
 
@@ -1261,6 +1293,56 @@ mod tests {
             mode,
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)
         );
+    }
+
+    #[test]
+    fn f11_records_the_choice() {
+        let mut app = presentation_app();
+        app.init_resource::<FullscreenChoice>();
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F11);
+        app.update();
+        assert_eq!(app.world().resource::<FullscreenChoice>().0, Some(true));
+    }
+
+    #[test]
+    fn the_cursor_hides_when_still_in_fullscreen_and_returns_when_moved() {
+        let mut app = presentation_app();
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    mode: WindowMode::BorderlessFullscreen(MonitorSelection::Primary),
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        let visible = |app: &App| app.world().get::<CursorOptions>(window).unwrap().visible;
+        app.update();
+        assert!(visible(&app));
+        for _ in 0..150 {
+            app.update();
+        }
+        assert!(!visible(&app));
+
+        app.world_mut().write_message(CursorMoved {
+            window,
+            position: Vec2::ZERO,
+            delta: None,
+        });
+        app.update();
+        assert!(visible(&app));
+
+        // A window always keeps its cursor.
+        app.world_mut().get_mut::<Window>(window).unwrap().mode = WindowMode::Windowed;
+        for _ in 0..150 {
+            app.update();
+        }
+        assert!(visible(&app));
     }
 
     #[test]

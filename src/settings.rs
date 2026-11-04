@@ -1,6 +1,8 @@
-//! The player's settings, kept between runs as a few lines of TOML: the
-//! master, music and effects volumes. The desktop game keeps them in a
-//! file, and the browser in its local storage.
+//! The player's settings, kept between runs as a few lines of TOML.
+//!
+//! They're the master, music and effects volumes, and whether the player last
+//! chose fullscreen. The desktop game keeps them in a file, and the browser
+//! in its local storage.
 
 use std::path::{Path, PathBuf};
 
@@ -18,6 +20,8 @@ pub struct Saved {
     pub master: f32,
     pub music: f32,
     pub effects: f32,
+    /// Left out until the player has chosen with F11.
+    pub fullscreen: Option<bool>,
 }
 
 impl Default for Saved {
@@ -32,6 +36,7 @@ impl From<&SoundSettings> for Saved {
             master: settings.master,
             music: settings.music,
             effects: settings.effects,
+            fullscreen: None,
         }
     }
 }
@@ -43,6 +48,18 @@ impl Saved {
         settings.music = self.music.clamp(0.0, 1.0);
         settings.effects = self.effects.clamp(0.0, 1.0);
     }
+}
+
+/// Whether the window opens fullscreen.
+///
+/// `flag` from the command line comes first. Then a release build goes by the
+/// player's `saved` choice, or fullscreen as most games do, while a dev build
+/// opens a window. A browser only allows fullscreen after a gesture, so the
+/// web build always opens in its page.
+#[must_use]
+pub fn opens_fullscreen(flag: Option<bool>, saved: Option<bool>, release: bool) -> bool {
+    let wanted = flag.unwrap_or_else(|| release && saved.unwrap_or(true));
+    wanted && cfg!(not(target_arch = "wasm32"))
 }
 
 /// Where settings are kept: `prismapsis/settings.toml` in the user's
@@ -144,8 +161,12 @@ fn local_storage() -> Option<web_sys::Storage> {
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
 pub struct SettingsStore(pub Option<Store>);
 
+/// The player's last choice with F11, if they've made one.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FullscreenChoice(pub Option<bool>);
+
 /// Loads the settings at start and saves them on leaving the settings
-/// screen.
+/// screen, and when the player chooses with F11.
 #[derive(Debug, Default)]
 pub struct SettingsPlugin {
     pub store: Option<Store>,
@@ -154,20 +175,40 @@ pub struct SettingsPlugin {
 impl Plugin for SettingsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SettingsStore(self.store.clone()))
+            .init_resource::<FullscreenChoice>()
             .add_systems(Startup, load_settings)
-            .add_systems(OnExit(Screen::Settings), save_settings);
+            .add_systems(OnExit(Screen::Settings), save_settings)
+            .add_systems(Update, save_settings.run_if(fullscreen_chosen));
     }
 }
 
-fn load_settings(store: Res<SettingsStore>, mut settings: ResMut<SoundSettings>) {
+fn load_settings(
+    store: Res<SettingsStore>,
+    mut settings: ResMut<SoundSettings>,
+    mut choice: ResMut<FullscreenChoice>,
+) {
     if let Some(saved) = store.0.as_ref().and_then(Store::load) {
         saved.apply(&mut settings);
+        choice.0 = saved.fullscreen;
     }
 }
 
-fn save_settings(store: Res<SettingsStore>, settings: Res<SoundSettings>) {
+/// True once F11 has changed the choice; not for loading it at the start.
+fn fullscreen_chosen(choice: Res<FullscreenChoice>) -> bool {
+    choice.is_changed() && !choice.is_added()
+}
+
+fn save_settings(
+    store: Res<SettingsStore>,
+    settings: Res<SoundSettings>,
+    choice: Res<FullscreenChoice>,
+) {
+    let saved = Saved {
+        fullscreen: choice.0,
+        ..Saved::from(&*settings)
+    };
     if let Some(store) = &store.0
-        && let Err(problem) = store.save(Saved::from(&*settings))
+        && let Err(problem) = store.save(saved)
     {
         warn!("couldn't save settings: {problem}");
     }
@@ -191,6 +232,7 @@ mod tests {
             master: 0.5,
             music: 0.2,
             effects: 0.9,
+            fullscreen: Some(false),
         };
         store.save(saved).unwrap();
         assert_eq!(store.load(), Some(saved));
@@ -213,12 +255,34 @@ mod tests {
     }
 
     #[test]
+    fn a_fullscreen_choice_is_left_out_until_made_and_older_files_load() {
+        let text = toml::to_string(&Saved::default()).unwrap();
+        assert!(!text.contains("fullscreen"), "{text}");
+        let older: Saved = toml::from_str("master = 0.5\nmusic = 0.5\neffects = 0.5\n").unwrap();
+        assert_eq!(older.fullscreen, None);
+    }
+
+    #[test]
+    fn the_command_line_wins_then_a_release_build_uses_the_saved_choice() {
+        // Release: fullscreen unless the player chose otherwise.
+        assert!(opens_fullscreen(None, None, true));
+        assert!(!opens_fullscreen(None, Some(false), true));
+        assert!(opens_fullscreen(Some(true), Some(false), true));
+        assert!(!opens_fullscreen(Some(false), Some(true), true));
+        // Dev: a window, whatever a release build saved.
+        assert!(!opens_fullscreen(None, None, false));
+        assert!(!opens_fullscreen(None, Some(true), false));
+        assert!(opens_fullscreen(Some(true), None, false));
+    }
+
+    #[test]
     fn applying_keeps_volumes_in_range() {
         let mut settings = SoundSettings::default();
         Saved {
             master: 2.0,
             music: -1.0,
             effects: 0.3,
+            fullscreen: None,
         }
         .apply(&mut settings);
         assert!((settings.master - 1.0).abs() < f32::EPSILON);
@@ -262,6 +326,40 @@ mod tests {
             .set(Screen::Title);
         app.update();
         assert!((store.load().unwrap().music - 0.25).abs() < f32::EPSILON);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn choosing_fullscreen_saves_it_and_keeps_the_volumes() {
+        use bevy::state::app::StatesPlugin;
+        let path = temp_file("choice");
+        let store = Store::File(path.clone());
+        store
+            .save(Saved {
+                master: 0.3,
+                ..Saved::default()
+            })
+            .unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin))
+            .init_resource::<SoundSettings>()
+            .insert_state(Screen::Playing)
+            .add_plugins(SettingsPlugin {
+                store: Some(store.clone()),
+            });
+        // Starting doesn't save: a volume changed behind its back stays out.
+        app.world_mut().resource_mut::<SoundSettings>().music = 0.25;
+        app.update();
+        app.update();
+        let before = store.load().unwrap();
+        assert_eq!(before.fullscreen, None);
+        assert!((before.music - Saved::default().music).abs() < f32::EPSILON);
+
+        app.world_mut().resource_mut::<FullscreenChoice>().0 = Some(false);
+        app.update();
+        let after = store.load().unwrap();
+        assert_eq!(after.fullscreen, Some(false));
+        assert!((after.master - 0.3).abs() < f32::EPSILON);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 }
