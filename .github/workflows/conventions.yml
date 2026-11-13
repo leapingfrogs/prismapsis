@@ -28,4 +28,4 @@ jobs:
         with:
           fetch-depth: 0
       # Default range lints every commit the PR adds (uses committed.toml).
-      - uses: crate-ci/committed@v1.1.11
+      - uses: crate-ci/committed@v1.1.12
